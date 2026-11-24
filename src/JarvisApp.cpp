@@ -1,3 +1,4 @@
+#define _WIN32_WINNT 0x0601
 #define UNICODE
 #define _UNICODE
 #include <windows.h>
@@ -5,6 +6,7 @@
 #include <string>
 #include <algorithm>
 #include <iphlpapi.h>
+#include <netioapi.h>
 #include <tlhelp32.h>
 #include <windowsx.h>
 
