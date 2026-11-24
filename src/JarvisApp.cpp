@@ -35,6 +35,7 @@ static void Card(HDC dc,int x,int y,int w,int h){HBRUSH b=CreateSolidBrush(panel
 static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  switch(m){
  case WM_CREATE:{
+ mainWnd=h;
  titleFont=CreateFontW(28,0,0,0,FW_SEMIBOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");normalFont=CreateFontW(16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");smallFont=CreateFontW(12,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  const wchar_t*names[]={L"Обзор",L"Внешний вид",L"Поведение",L"О программе"};for(int i=0;i<4;i++)nav[i]=CreateWindowExW(0,L"BUTTON",names[i],WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,24,150+i*58,210,44,h,(HMENU)(INT_PTR)(ID_DASH+i),GetModuleHandleW(nullptr),nullptr);
  Add(0,Make(L"STATIC",L"ЗАГРУЗКА СИСТЕМЫ",SS_LEFT,280,112,500,36,0));Add(1,Make(L"STATIC",L"CPU",SS_LEFT,286,190,130,25,0));Add(2,Make(L"STATIC",L"RAM",SS_LEFT,530,190,130,25,0));Add(3,Make(L"STATIC",L"ДИСК C: СВОБОДНО",SS_LEFT,774,190,230,25,0));Add(4,Make(L"STATIC",L"0%",SS_LEFT,286,225,200,58,0));Add(5,Make(L"STATIC",L"0%",SS_LEFT,530,225,200,58,0));Add(6,Make(L"STATIC",L"-- GB",SS_LEFT,774,225,220,58,0));Add(7,Make(L"STATIC",L"ARC REACTOR  /  SYSTEM CORE",SS_LEFT,286,360,650,28,0));Add(8,Make(L"STATIC",L"Система готова к работе. Показатели обновляются автоматически.",SS_LEFT,286,405,650,30,0));
