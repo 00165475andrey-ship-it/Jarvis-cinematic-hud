@@ -46,7 +46,7 @@ static void RunModule(int idx){
  switch(idx){
  case 0: case 1: case 2: case 4: ShowModulePanel(idx); break;
  case 3: ShellExecuteW(mainWnd,L"open",L"perfmon.exe",L"/rel",nullptr,SW_SHOWNORMAL); break;
- case 4: ShellExecuteW(mainWnd,L"open",L"notepad.exe",L"jarvis-scenarios.txt",nullptr,SW_SHOWNORMAL); break;
+ 
  case 5: ShellExecuteW(mainWnd,L"open",L"notepad.exe",logPath.c_str(),nullptr,SW_SHOWNORMAL); break;
  }
 }
@@ -151,7 +151,7 @@ static void ShowModulePanel(int idx){
   CreateWindowW(L"BUTTON",L"Применить режим",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,125,200,42,moduleWnd,(HMENU)502,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"BUTTON",L"Вернуть предыдущий режим",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,240,125,230,42,moduleWnd,(HMENU)503,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"STATIC",L"Меняется активная схема электропитания Windows. Доступность зависит от конфигурации системы.",WS_CHILD|WS_VISIBLE,24,190,450,52,moduleWnd,nullptr,nullptr,nullptr);
- }else{
+ }else if(idx==1){
   processList=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|LBS_NOTIFY|WS_VSCROLL|LBS_NOINTEGRALHEIGHT,18,18,665,440,moduleWnd,(HMENU)511,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"BUTTON",L"Обновить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,472,140,38,moduleWnd,(HMENU)512,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"BUTTON",L"Завершить выбранный процесс",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,175,472,260,38,moduleWnd,(HMENU)513,GetModuleHandleW(nullptr),nullptr);
