@@ -214,7 +214,7 @@ static void ShowModulePanel(int idx){
   CreateWindowW(L"STATIC",L"Игровой: высокая производительность + виджеты. Рабочий: сбалансированный режим. Энергосбережение: режим экономии + скрытие виджетов.",WS_CHILD|WS_VISIBLE,24,190,490,78,moduleWnd,nullptr,nullptr,nullptr);
   CreateWindowW(L"STATIC",L"Пользовательский сценарий:",WS_CHILD|WS_VISIBLE,24,282,210,26,moduleWnd,nullptr,nullptr,nullptr);
   HWND customMode=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,24,310,260,130,moduleWnd,(HMENU)523,GetModuleHandleW(nullptr),nullptr);
-  const wchar_t* cm[]={L"Высокая производительность",L"Сбалансированный",L"Энергосбережение"};for(auto v:cm)SendMessageW(customMode,CB_ADDSTRING,0,(LPARAM)v);SendMessageW(customMode,CB_SETCURSEL,customScenarioMode,0);
+  const wchar_t* cm[]={L"Сбалансированный",L"Высокая производительность",L"Энергосбережение"};for(auto v:cm)SendMessageW(customMode,CB_ADDSTRING,0,(LPARAM)v);SendMessageW(customMode,CB_SETCURSEL,customScenarioMode,0);
   HWND customHud=CreateWindowW(L"BUTTON",L"Оставить виджеты на экране",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,300,310,230,28,moduleWnd,(HMENU)524,GetModuleHandleW(nullptr),nullptr);SendMessageW(customHud,BM_SETCHECK,customScenarioHud?BST_CHECKED:BST_UNCHECKED,0);
   CreateWindowW(L"BUTTON",L"Сохранить и запустить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,345,240,38,moduleWnd,(HMENU)525,GetModuleHandleW(nullptr),nullptr);
  }else if(idx==5){
