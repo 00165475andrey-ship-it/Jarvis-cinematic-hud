@@ -20,7 +20,7 @@ jobs:
           & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.v142.x86.x64 --quiet --wait --norestart
           if ($LASTEXITCODE -ne 0) { throw "Could not install MSVC v142 toolset" }
       - name: Configure for Windows 7 SP1 x64
-        run: cmake -S . -B build-win7 -A x64 -T v142 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_CXX_FLAGS="/DWINVER=0x0601 /D_WIN32_WINNT=0x0601" -DCMAKE_EXE_LINKER_FLAGS="/SUBSYSTEM:WINDOWS,6.01"
+        run: cmake -S . -B build-win7 -A x64 -T v142 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_CXX_FLAGS="/DWINVER=0x0601 /D_WIN32_WINNT=0x0601"
       - name: Build
         run: cmake --build build-win7 --config Release
       - name: Package
