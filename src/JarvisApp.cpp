@@ -9,12 +9,16 @@
 #include <netioapi.h>
 #include <tlhelp32.h>
 #include <windowsx.h>
+#include <powrprof.h>
+#include <psapi.h>
 #include <vector>
 #include <shellapi.h>
 #include <fstream>
 #include <ctime>
 
 #pragma comment(lib, "Comctl32.lib")
+#pragma comment(lib, "PowrProf.lib")
+#pragma comment(lib, "Psapi.lib")
 static constexpr wchar_t APP_NAME[]=L"J.A.R.V.I.S. Desktop";
 enum { ID_DASH=100, ID_APPEAR=101, ID_BEHAVIOR=102, ID_ABOUT=103, ID_APPLY=110, ID_OPACITY=120, ID_WIDTH=121, ID_HEIGHT=122, ID_POSITION=123, ID_ANIM=124, ID_MOUSE=125, ID_REACTOR=126, ID_DECOR=127, ID_AUTOSTART=128, ID_HUD_TOGGLE=130, ID_MODULE_BASE=140 };
 enum Page { DASHBOARD, APPEARANCE, BEHAVIOR, ABOUT };
@@ -22,24 +26,24 @@ static constexpr int MODULE_COUNT=6;
 static const wchar_t* moduleNames[MODULE_COUNT]={L"Режимы системы",L"Диспетчер процессов",L"Сетевой контроль",L"Диагностика Windows",L"Автоматические сценарии",L"Журнал системы"};
 static bool moduleEnabled[MODULE_COUNT]={true,true,false,false,false,false};
 struct Config { int opacity=90,width=600,height=380,position=0; bool animations=true,mouse=true,reactor=true,decorations=true,autostart=false; };
-static Config cfg; static HWND mainWnd,nav[4],controls[48],applyButton; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true;
+static Config cfg; static HWND mainWnd,nav[4],controls[48],applyButton; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true; static HWND moduleWnd=nullptr,modeCombo=nullptr,processList=nullptr; static GUID previousPowerScheme{}; static bool havePreviousPowerScheme=false;
 static HFONT titleFont,normalFont,smallFont; static HWND aboutControls[4]{}; static COLORREF bg=RGB(9,15,25),panel=RGB(16,27,42),cyan=RGB(0,205,245),muted=RGB(135,160,180);
 static std::wstring iniPath; static std::wstring logPath, scenarioPath; static int cpuValue=0,ramValue=0; static ULONGLONG oldIdle=0,oldKernel=0,oldUser=0; static bool cpuReady=false;
 static std::wstring IniPath(){wchar_t p[MAX_PATH]{};GetModuleFileNameW(nullptr,p,MAX_PATH);std::wstring s(p);auto n=s.find_last_of(L"\\/");return (n==s.npos?L"":s.substr(0,n+1))+L"jarvis.ini";}
 static void Load(){for(int i=0;i<MODULE_COUNT;i++){wchar_t key[32];swprintf_s(key,L"Module%dEnabled",i);moduleEnabled[i]=GetPrivateProfileIntW(L"Modules",key,i<2?1:0,iniPath.c_str())!=0;}int enabled=0;for(bool v:moduleEnabled)if(v)enabled++;if(enabled>2){int kept=0;for(int i=0;i<MODULE_COUNT;i++)if(moduleEnabled[i]&&kept++>=2)moduleEnabled[i]=false;}cfg.opacity=GetPrivateProfileIntW(L"Appearance",L"Opacity",90,iniPath.c_str());cfg.width=GetPrivateProfileIntW(L"Appearance",L"Width",600,iniPath.c_str());cfg.height=GetPrivateProfileIntW(L"Appearance",L"Height",380,iniPath.c_str());cfg.position=GetPrivateProfileIntW(L"Appearance",L"Position",0,iniPath.c_str());cfg.animations=GetPrivateProfileIntW(L"Behavior",L"Animations",1,iniPath.c_str())!=0;cfg.mouse=GetPrivateProfileIntW(L"Behavior",L"MouseEffects",1,iniPath.c_str())!=0;cfg.reactor=GetPrivateProfileIntW(L"Behavior",L"Reactor",1,iniPath.c_str())!=0;cfg.decorations=GetPrivateProfileIntW(L"Behavior",L"Decorations",1,iniPath.c_str())!=0;cfg.autostart=GetPrivateProfileIntW(L"Behavior",L"Autostart",0,iniPath.c_str())!=0;preferredMode=GetPrivateProfileIntW(L"SystemMode",L"Preferred",0,iniPath.c_str());processRefresh=GetPrivateProfileIntW(L"ProcessManager",L"RefreshSeconds",1,iniPath.c_str());showSystemProcesses=GetPrivateProfileIntW(L"ProcessManager",L"ShowSystem",0,iniPath.c_str())!=0;confirmProcessAction=GetPrivateProfileIntW(L"ProcessManager",L"ConfirmActions",1,iniPath.c_str())!=0;modeDefault=GetPrivateProfileIntW(L"SystemMode",L"UseAsDefault",0,iniPath.c_str())!=0;preferredMode=std::clamp(preferredMode,0,2);processRefresh=(processRefresh==5?5:processRefresh==2?2:1);}
 static void Save(){wchar_t b[32];for(int i=0;i<MODULE_COUNT;i++){wchar_t key[32];swprintf_s(key,L"Module%dEnabled",i);swprintf_s(b,L"%d",moduleEnabled[i]?1:0);WritePrivateProfileStringW(L"Modules",key,b,iniPath.c_str());}auto put=[&](const wchar_t*s,const wchar_t*k,int v){swprintf_s(b,L"%d",v);WritePrivateProfileStringW(s,k,b,iniPath.c_str());};put(L"Appearance",L"Opacity",cfg.opacity);put(L"Appearance",L"Width",cfg.width);put(L"Appearance",L"Height",cfg.height);put(L"Appearance",L"Position",cfg.position);put(L"Behavior",L"Animations",cfg.animations);put(L"Behavior",L"MouseEffects",cfg.mouse);put(L"Behavior",L"Reactor",cfg.reactor);put(L"Behavior",L"Decorations",cfg.decorations);put(L"Behavior",L"Autostart",cfg.autostart);put(L"SystemMode",L"Preferred",preferredMode);put(L"SystemMode",L"UseAsDefault",modeDefault);put(L"ProcessManager",L"RefreshSeconds",processRefresh);put(L"ProcessManager",L"ShowSystem",showSystemProcesses);put(L"ProcessManager",L"ConfirmActions",confirmProcessAction);}
 static HWND Make(const wchar_t*cls,const wchar_t*txt,DWORD style,int x,int y,int w,int h,int id){HWND c=CreateWindowExW(0,cls,txt,WS_CHILD|WS_VISIBLE|style,x,y,w,h,mainWnd,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);SendMessageW(c,WM_SETFONT,(WPARAM)normalFont,TRUE);return c;}
-static void Add(int i,HWND h){if(i>=0&&i<40)controls[i]=h;}
+static void Add(int i,HWND h){if(i>=0&&i<48)controls[i]=h;}
 static void HideControls(){for(HWND h:controls)if(h)ShowWindow(h,SW_HIDE);for(HWND h:aboutControls)if(h)ShowWindow(h,SW_HIDE);}
 static HWND TextAt(const wchar_t*t,int x,int y,int w,int h){return Make(L"STATIC",t,SS_LEFT,x,y,w,h,0);}
 static void SetText(int i,const wchar_t*t){if(controls[i])SetWindowTextW(controls[i],t);}
 static void LogEvent(const std::wstring& event){std::wofstream f(logPath,std::ios::app);if(f){SYSTEMTIME t{};GetLocalTime(&t);f<<L"["<<t.wYear<<L"-"<<t.wMonth<<L"-"<<t.wDay<<L" "<<t.wHour<<L":"<<t.wMinute<<L":"<<t.wSecond<<L"] "<<event<<L"\\n";}}
+static void ShowModulePanel(int idx);
 static void RunModule(int idx){
  const wchar_t* names[]={L"Режимы системы",L"Диспетчер процессов",L"Сетевой контроль",L"Диагностика Windows",L"Автоматические сценарии",L"Журнал системы"};
  LogEvent(std::wstring(L"Открыт модуль: ")+names[idx]);
  switch(idx){
- case 0: ShellExecuteW(mainWnd,L"open",L"powercfg.cpl",nullptr,nullptr,SW_SHOWNORMAL); break;
- case 1: ShellExecuteW(mainWnd,L"open",L"taskmgr.exe",nullptr,nullptr,SW_SHOWNORMAL); break;
+ case 0: case 1: ShowModulePanel(idx); break;
  case 2: ShellExecuteW(mainWnd,L"open",L"ncpa.cpl",nullptr,nullptr,SW_SHOWNORMAL); break;
  case 3: ShellExecuteW(mainWnd,L"open",L"perfmon.exe",L"/rel",nullptr,SW_SHOWNORMAL); break;
  case 4: ShellExecuteW(mainWnd,L"open",L"notepad.exe",L"jarvis-scenarios.txt",nullptr,SW_SHOWNORMAL); break;
@@ -83,6 +87,59 @@ DWORD tableSize=0;GetIfTable(nullptr,&tableSize,FALSE);std::vector<BYTE> tableBu
 ULONGLONG sec=GetTickCount64()/1000;swprintf_s(b,L"%llu д %02llu:%02llu",sec/86400,(sec/3600)%24,(sec/60)%60);hud[5].value=b;SYSTEM_POWER_STATUS ps{};if(GetSystemPowerStatus(&ps)&&ps.BatteryLifePercent!=255){swprintf_s(b,L"%u%%",ps.BatteryLifePercent);hud[6].value=b;}else hud[6].value=L"Нет батареи";
 int count=0;HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);if(snap!=INVALID_HANDLE_VALUE){PROCESSENTRY32W pe{};pe.dwSize=sizeof(pe);if(Process32FirstW(snap,&pe))do{count++;}while(Process32NextW(snap,&pe));CloseHandle(snap);}swprintf_s(b,L"%d",count);hud[7].value=b;SYSTEMTIME st{};GetLocalTime(&st);swprintf_s(b,L"%02u:%02u:%02u",st.wHour,st.wMinute,st.wSecond);hud[8].value=b;for(auto&w:hud)if(w.hwnd)InvalidateRect(w.hwnd,nullptr,TRUE);}
 
+
+static bool ApplyPowerMode(int mode){
+ const wchar_t* ids[]={L"{381b4222-f694-41f0-9685-ff5bb260df2e}",L"{8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c}",L"{a1841308-3541-4fab-bc81-f71556f20b4a}"};
+ GUID target{}; if(FAILED(CLSIDFromString(ids[std::clamp(mode,0,2)],&target)))return false;
+ return PowerSetActiveScheme(nullptr,&target)==ERROR_SUCCESS;
+}
+static bool IsProtectedProcess(const wchar_t* n,DWORD pid){
+ if(pid<=4)return true;
+ const wchar_t* blocked[]={L"csrss.exe",L"wininit.exe",L"winlogon.exe",L"services.exe",L"lsass.exe",L"smss.exe",L"system",L"registry"};
+ for(auto x:blocked)if(_wcsicmp(n,x)==0)return true;return false;
+}
+static void RefreshProcessList(){
+ if(!processList)return;SendMessageW(processList,LB_RESETCONTENT,0,0);
+ HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);if(snap==INVALID_HANDLE_VALUE)return;
+ PROCESSENTRY32W pe{};pe.dwSize=sizeof(pe);
+ if(Process32FirstW(snap,&pe))do{
+  if(!showSystemProcesses&&(pe.th32ProcessID<=4||_wcsicmp(pe.szExeFile,L"System")==0))continue;
+  SIZE_T mem=0;HANDLE p=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,pe.th32ProcessID);
+  if(p){PROCESS_MEMORY_COUNTERS pm{};pm.cb=sizeof(pm);if(GetProcessMemoryInfo(p,&pm,sizeof(pm)))mem=pm.WorkingSetSize;CloseHandle(p);}
+  wchar_t line[512];swprintf_s(line,L"%-30s PID %-7lu %8.1f MB",pe.szExeFile,pe.th32ProcessID,(double)mem/1048576.0);
+  int at=(int)SendMessageW(processList,LB_ADDSTRING,0,(LPARAM)line);SendMessageW(processList,LB_SETITEMDATA,at,pe.th32ProcessID);
+ }while(Process32NextW(snap,&pe));CloseHandle(snap);
+}
+static void ShowModulePanel(int idx){
+ if(moduleWnd){DestroyWindow(moduleWnd);moduleWnd=nullptr;modeCombo=processList=nullptr;}
+ moduleWnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"JarvisModulePanel",idx==0?L"J.A.R.V.I.S. — Системные режимы":L"J.A.R.V.I.S. — Диспетчер процессов",WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,0,0,idx==0?520:720,idx==0?300:550,mainWnd,nullptr,GetModuleHandleW(nullptr),nullptr);
+ if(!moduleWnd)return;RECT w{};SystemParametersInfoW(SPI_GETWORKAREA,0,&w,0);SetWindowPos(moduleWnd,HWND_TOPMOST,w.right-(idx==0?540:740),w.top+80,idx==0?520:720,idx==0?300:550,SWP_SHOWWINDOW);
+ if(idx==0){
+  CreateWindowW(L"STATIC",L"Выберите режим питания Windows:",WS_CHILD|WS_VISIBLE,24,25,450,28,moduleWnd,nullptr,nullptr,nullptr);
+  modeCombo=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,24,65,450,180,moduleWnd,(HMENU)501,GetModuleHandleW(nullptr),nullptr);
+  const wchar_t* names[]={L"Сбалансированный",L"Высокая производительность",L"Энергосбережение"};for(auto n:names)SendMessageW(modeCombo,CB_ADDSTRING,0,(LPARAM)n);SendMessageW(modeCombo,CB_SETCURSEL,preferredMode,0);
+  CreateWindowW(L"BUTTON",L"Применить режим",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,125,200,42,moduleWnd,(HMENU)502,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Вернуть предыдущий режим",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,240,125,230,42,moduleWnd,(HMENU)503,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"STATIC",L"Меняется активная схема электропитания Windows. Доступность зависит от конфигурации системы.",WS_CHILD|WS_VISIBLE,24,190,450,52,moduleWnd,nullptr,nullptr,nullptr);
+ }else{
+  processList=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|LBS_NOTIFY|WS_VSCROLL|LBS_NOINTEGRALHEIGHT,18,18,665,440,moduleWnd,(HMENU)511,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Обновить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,472,140,38,moduleWnd,(HMENU)512,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Завершить выбранный процесс",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,175,472,260,38,moduleWnd,(HMENU)513,GetModuleHandleW(nullptr),nullptr);
+  RefreshProcessList();SetTimer(moduleWnd,1,processRefresh*1000,nullptr);
+ }
+}
+static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
+ if(m==WM_COMMAND){switch(LOWORD(wp)){
+ case 502:{int mode=(int)SendMessageW(modeCombo,CB_GETCURSEL,0,0);if(mode<0)return 0;if(!havePreviousPowerScheme){GUID* active=nullptr;if(PowerGetActiveScheme(nullptr,&active)==ERROR_SUCCESS&&active){previousPowerScheme=*active;havePreviousPowerScheme=true;LocalFree(active);}}if(ApplyPowerMode(mode)){preferredMode=mode;Save();MessageBoxW(h,L"Режим электропитания Windows изменён.",APP_NAME,MB_OK|MB_ICONINFORMATION);}else MessageBoxW(h,L"Windows не смогла применить эту схему питания. Возможно, она отсутствует.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}
+ case 503:if(havePreviousPowerScheme&&PowerSetActiveScheme(nullptr,&previousPowerScheme)==ERROR_SUCCESS)MessageBoxW(h,L"Предыдущая схема питания восстановлена.",APP_NAME,MB_OK|MB_ICONINFORMATION);else MessageBoxW(h,L"Предыдущая схема не сохранена или восстановить её не удалось.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;
+ case 512:RefreshProcessList();return 0;
+ case 513:{int sel=(int)SendMessageW(processList,LB_GETCURSEL,0,0);if(sel==LB_ERR)return 0;DWORD pid=(DWORD)SendMessageW(processList,LB_GETITEMDATA,sel,0);wchar_t line[512]{};SendMessageW(processList,LB_GETTEXT,sel,(LPARAM)line);wchar_t* name=line;while(*name==L' ')name++;if(IsProtectedProcess(name,pid)){MessageBoxW(h,L"Этот системный процесс защищён от завершения.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}if(confirmProcessAction&&MessageBoxW(h,L"Завершить выбранный процесс? Несохранённые данные могут быть потеряны.",APP_NAME,MB_YESNO|MB_ICONWARNING)!=IDYES)return 0;HANDLE p=OpenProcess(PROCESS_TERMINATE,FALSE,pid);if(!p||!TerminateProcess(p,1)){if(p)CloseHandle(p);MessageBoxW(h,L"Не удалось завершить процесс. Возможно, нужны права администратора.",APP_NAME,MB_OK|MB_ICONWARNING);}else{CloseHandle(p);LogEvent(L"Завершён процесс PID "+std::to_wstring(pid));RefreshProcessList();}return 0;}
+ }}
+ if(m==WM_TIMER){RefreshProcessList();return 0;}
+ if(m==WM_DESTROY){KillTimer(h,1);if(moduleWnd==h){moduleWnd=nullptr;modeCombo=processList=nullptr;}return 0;}
+ return DefWindowProcW(h,m,wp,lp);
+}
+
 static void Startup(bool on){HKEY k{};if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,KEY_SET_VALUE,&k)!=ERROR_SUCCESS)return;if(on){wchar_t p[MAX_PATH]{};GetModuleFileNameW(nullptr,p,MAX_PATH);RegSetValueExW(k,L"JARVIS Desktop",0,REG_SZ,(BYTE*)p,(DWORD)((wcslen(p)+1)*sizeof(wchar_t)));}else RegDeleteValueW(k,L"JARVIS Desktop");RegCloseKey(k);}
 static void Card(HDC dc,int x,int y,int w,int h){HBRUSH b=CreateSolidBrush(panel);RECT r{x,y,x+w,y+h};FillRect(dc,&r,b);DeleteObject(b);HPEN p=CreatePen(PS_SOLID,1,RGB(31,65,86));HGDIOBJ old=SelectObject(dc,p);SelectObject(dc,GetStockObject(NULL_BRUSH));RoundRect(dc,x,y,x+w,y+h,16,16);SelectObject(dc,old);DeleteObject(p);}
 static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM wp,LPARAM lp){
@@ -112,4 +169,4 @@ static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case WM_DESTROY:UnregisterHotKey(h,1);KillTimer(h,1);SaveHudPositions();for(auto&w:hud)if(w.hwnd)DestroyWindow(w.hwnd);PostQuitMessage(0);return 0;
  }return DefWindowProcW(h,m,wp,lp);
 }
-int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){iniPath=IniPath();logPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis.log";scenarioPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis-scenarios.txt";Load();INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=Proc;wc.hInstance=inst;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=CreateSolidBrush(bg);wc.lpszClassName=L"JarvisDesktopWindow";wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION);if(!RegisterClassExW(&wc))return 1;mainWnd=CreateWindowExW(0,wc.lpszClassName,APP_NAME,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1120,760,nullptr,nullptr,inst,nullptr);if(!mainWnd)return 2;ShowWindow(mainWnd,show);UpdateWindow(mainWnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return (int)msg.wParam;}
+int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){iniPath=IniPath();logPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis.log";scenarioPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis-scenarios.txt";Load();INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);WNDCLASSEXW panelClass{sizeof(panelClass)};panelClass.lpfnWndProc=ModulePanelProc;panelClass.hInstance=inst;panelClass.lpszClassName=L"JarvisModulePanel";panelClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassExW(&panelClass);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=Proc;wc.hInstance=inst;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=CreateSolidBrush(bg);wc.lpszClassName=L"JarvisDesktopWindow";wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION);if(!RegisterClassExW(&wc))return 1;mainWnd=CreateWindowExW(0,wc.lpszClassName,APP_NAME,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1120,760,nullptr,nullptr,inst,nullptr);if(!mainWnd)return 2;ShowWindow(mainWnd,show);UpdateWindow(mainWnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return (int)msg.wParam;}
