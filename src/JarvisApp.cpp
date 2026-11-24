@@ -27,11 +27,11 @@ static constexpr int MODULE_COUNT=6;
 static const wchar_t* moduleNames[MODULE_COUNT]={L"Режимы системы",L"Диспетчер процессов",L"Сетевой контроль",L"Диагностика Windows",L"Автоматические сценарии",L"Журнал системы"};
 static bool moduleEnabled[MODULE_COUNT]={true,true,false,false,false,false};
 struct Config { int opacity=90,width=600,height=380,position=0; bool animations=true,mouse=true,reactor=true,decorations=true,autostart=false; };
-static Config cfg; static HWND mainWnd,nav[4],controls[48],applyButton; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true; static int networkRefreshSeconds=2,scenarioDefault=0; static bool showDisconnectedInterfaces=false,networkAutoRefresh=true,confirmScenarioRun=true,restoreHudAfterScenario=false; static HWND moduleWnd=nullptr,modeCombo=nullptr,processList=nullptr,networkList=nullptr,scenarioCombo=nullptr; static int activePanelIndex=-1; static GUID previousPowerScheme{}; static bool havePreviousPowerScheme=false;
+static Config cfg; static HWND mainWnd,nav[4],controls[48],applyButton; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true; static int networkRefreshSeconds=2,scenarioDefault=0; static bool showDisconnectedInterfaces=false,networkAutoRefresh=true,confirmScenarioRun=true,restoreHudAfterScenario=false; static HWND moduleWnd=nullptr,modeCombo=nullptr,processList=nullptr,networkList=nullptr,scenarioCombo=nullptr,logList=nullptr; static int activePanelIndex=-1; static GUID previousPowerScheme{}; static bool havePreviousPowerScheme=false;
 static HFONT titleFont,normalFont,smallFont; static HWND aboutControls[4]{}; static COLORREF bg=RGB(9,15,25),panel=RGB(16,27,42),cyan=RGB(0,205,245),muted=RGB(135,160,180);
 static std::wstring iniPath; static std::wstring logPath, scenarioPath; static int cpuValue=0,ramValue=0; static ULONGLONG oldIdle=0,oldKernel=0,oldUser=0; static bool cpuReady=false;
 static std::wstring IniPath(){wchar_t p[MAX_PATH]{};GetModuleFileNameW(nullptr,p,MAX_PATH);std::wstring s(p);auto n=s.find_last_of(L"\\/");return (n==s.npos?L"":s.substr(0,n+1))+L"jarvis.ini";}
-static void Load(){for(int i=0;i<MODULE_COUNT;i++){wchar_t key[32];swprintf_s(key,L"Module%dEnabled",i);moduleEnabled[i]=GetPrivateProfileIntW(L"Modules",key,i<2?1:0,iniPath.c_str())!=0;}int enabled=0;for(bool v:moduleEnabled)if(v)enabled++;if(enabled>2){int kept=0;for(int i=0;i<MODULE_COUNT;i++)if(moduleEnabled[i]&&kept++>=2)moduleEnabled[i]=false;}cfg.opacity=GetPrivateProfileIntW(L"Appearance",L"Opacity",90,iniPath.c_str());cfg.width=GetPrivateProfileIntW(L"Appearance",L"Width",600,iniPath.c_str());cfg.height=GetPrivateProfileIntW(L"Appearance",L"Height",380,iniPath.c_str());cfg.position=GetPrivateProfileIntW(L"Appearance",L"Position",0,iniPath.c_str());cfg.animations=GetPrivateProfileIntW(L"Behavior",L"Animations",1,iniPath.c_str())!=0;cfg.mouse=GetPrivateProfileIntW(L"Behavior",L"MouseEffects",1,iniPath.c_str())!=0;cfg.reactor=GetPrivateProfileIntW(L"Behavior",L"Reactor",1,iniPath.c_str())!=0;cfg.decorations=GetPrivateProfileIntW(L"Behavior",L"Decorations",1,iniPath.c_str())!=0;cfg.autostart=GetPrivateProfileIntW(L"Behavior",L"Autostart",0,iniPath.c_str())!=0;preferredMode=GetPrivateProfileIntW(L"SystemMode",L"Preferred",0,iniPath.c_str());processRefresh=GetPrivateProfileIntW(L"ProcessManager",L"RefreshSeconds",1,iniPath.c_str());showSystemProcesses=GetPrivateProfileIntW(L"ProcessManager",L"ShowSystem",0,iniPath.c_str())!=0;confirmProcessAction=GetPrivateProfileIntW(L"ProcessManager",L"ConfirmActions",1,iniPath.c_str())!=0;modeDefault=GetPrivateProfileIntW(L"SystemMode",L"UseAsDefault",0,iniPath.c_str())!=0;networkRefreshSeconds=GetPrivateProfileIntW(L"Network",L"RefreshSeconds",2,iniPath.c_str());networkRefreshSeconds=networkRefreshSeconds==1?1:networkRefreshSeconds==5?5:2;showDisconnectedInterfaces=GetPrivateProfileIntW(L"Network",L"ShowDisconnected",0,iniPath.c_str())!=0;networkAutoRefresh=GetPrivateProfileIntW(L"Network",L"AutoRefresh",1,iniPath.c_str())!=0;scenarioDefault=std::clamp(GetPrivateProfileIntW(L"Automation",L"DefaultScenario",0,iniPath.c_str()),0,2);confirmScenarioRun=GetPrivateProfileIntW(L"Automation",L"ConfirmRun",1,iniPath.c_str())!=0;restoreHudAfterScenario=GetPrivateProfileIntW(L"Automation",L"RestoreHud",0,iniPath.c_str())!=0;preferredMode=std::clamp(preferredMode,0,2);processRefresh=(processRefresh==5?5:processRefresh==2?2:1);}
+static void Load(){for(int i=0;i<MODULE_COUNT;i++){wchar_t key[32];swprintf_s(key,L"Module%dEnabled",i);moduleEnabled[i]=GetPrivateProfileIntW(L"Modules",key,i<2?1:0,iniPath.c_str())!=0;}int enabled=0;for(bool v:moduleEnabled)if(v)enabled++;if(enabled>2){int kept=0;for(int i=0;i<MODULE_COUNT;i++)if(moduleEnabled[i]&&kept++>=2)moduleEnabled[i]=false;}cfg.opacity=GetPrivateProfileIntW(L"Appearance",L"Opacity",90,iniPath.c_str());cfg.width=GetPrivateProfileIntW(L"Appearance",L"Width",600,iniPath.c_str());cfg.height=GetPrivateProfileIntW(L"Appearance",L"Height",380,iniPath.c_str());cfg.position=GetPrivateProfileIntW(L"Appearance",L"Position",0,iniPath.c_str());cfg.animations=GetPrivateProfileIntW(L"Behavior",L"Animations",1,iniPath.c_str())!=0;cfg.mouse=GetPrivateProfileIntW(L"Behavior",L"MouseEffects",1,iniPath.c_str())!=0;cfg.reactor=GetPrivateProfileIntW(L"Behavior",L"Reactor",1,iniPath.c_str())!=0;cfg.decorations=GetPrivateProfileIntW(L"Behavior",L"Decorations",1,iniPath.c_str())!=0;cfg.autostart=GetPrivateProfileIntW(L"Behavior",L"Autostart",0,iniPath.c_str())!=0;preferredMode=GetPrivateProfileIntW(L"SystemMode",L"Preferred",0,iniPath.c_str());processRefresh=GetPrivateProfileIntW(L"ProcessManager",L"RefreshSeconds",1,iniPath.c_str());showSystemProcesses=GetPrivateProfileIntW(L"ProcessManager",L"ShowSystem",0,iniPath.c_str())!=0;confirmProcessAction=GetPrivateProfileIntW(L"ProcessManager",L"ConfirmActions",1,iniPath.c_str())!=0;modeDefault=GetPrivateProfileIntW(L"SystemMode",L"UseAsDefault",0,iniPath.c_str())!=0;networkRefreshSeconds=GetPrivateProfileIntW(L"Network",L"RefreshSeconds",2,iniPath.c_str());networkRefreshSeconds=networkRefreshSeconds==1?1:networkRefreshSeconds==5?5:2;showDisconnectedInterfaces=GetPrivateProfileIntW(L"Network",L"ShowDisconnected",0,iniPath.c_str())!=0;networkAutoRefresh=GetPrivateProfileIntW(L"Network",L"AutoRefresh",1,iniPath.c_str())!=0;scenarioDefault=std::clamp((int)GetPrivateProfileIntW(L"Automation",L"DefaultScenario",0,iniPath.c_str()),0,2);confirmScenarioRun=GetPrivateProfileIntW(L"Automation",L"ConfirmRun",1,iniPath.c_str())!=0;restoreHudAfterScenario=GetPrivateProfileIntW(L"Automation",L"RestoreHud",0,iniPath.c_str())!=0;preferredMode=std::clamp(preferredMode,0,2);processRefresh=(processRefresh==5?5:processRefresh==2?2:1);}
 static void Save(){wchar_t b[32];for(int i=0;i<MODULE_COUNT;i++){wchar_t key[32];swprintf_s(key,L"Module%dEnabled",i);swprintf_s(b,L"%d",moduleEnabled[i]?1:0);WritePrivateProfileStringW(L"Modules",key,b,iniPath.c_str());}auto put=[&](const wchar_t*s,const wchar_t*k,int v){swprintf_s(b,L"%d",v);WritePrivateProfileStringW(s,k,b,iniPath.c_str());};put(L"Appearance",L"Opacity",cfg.opacity);put(L"Appearance",L"Width",cfg.width);put(L"Appearance",L"Height",cfg.height);put(L"Appearance",L"Position",cfg.position);put(L"Behavior",L"Animations",cfg.animations);put(L"Behavior",L"MouseEffects",cfg.mouse);put(L"Behavior",L"Reactor",cfg.reactor);put(L"Behavior",L"Decorations",cfg.decorations);put(L"Behavior",L"Autostart",cfg.autostart);put(L"SystemMode",L"Preferred",preferredMode);put(L"SystemMode",L"UseAsDefault",modeDefault);put(L"ProcessManager",L"RefreshSeconds",processRefresh);put(L"ProcessManager",L"ShowSystem",showSystemProcesses);put(L"ProcessManager",L"ConfirmActions",confirmProcessAction);put(L"Network",L"RefreshSeconds",networkRefreshSeconds);put(L"Network",L"ShowDisconnected",showDisconnectedInterfaces);put(L"Network",L"AutoRefresh",networkAutoRefresh);put(L"Automation",L"DefaultScenario",scenarioDefault);put(L"Automation",L"ConfirmRun",confirmScenarioRun);put(L"Automation",L"RestoreHud",restoreHudAfterScenario);}
 static HWND Make(const wchar_t*cls,const wchar_t*txt,DWORD style,int x,int y,int w,int h,int id){HWND c=CreateWindowExW(0,cls,txt,WS_CHILD|WS_VISIBLE|style,x,y,w,h,mainWnd,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);SendMessageW(c,WM_SETFONT,(WPARAM)normalFont,TRUE);return c;}
 static void Add(int i,HWND h){if(i>=0&&i<48)controls[i]=h;}
@@ -44,10 +44,7 @@ static void RunModule(int idx){
  const wchar_t* names[]={L"Режимы системы",L"Диспетчер процессов",L"Сетевой контроль",L"Диагностика Windows",L"Автоматические сценарии",L"Журнал системы"};
  LogEvent(std::wstring(L"Открыт модуль: ")+names[idx]);
  switch(idx){
- case 0: case 1: case 2: case 4: ShowModulePanel(idx); break;
- case 3: ShellExecuteW(mainWnd,L"open",L"perfmon.exe",L"/rel",nullptr,SW_SHOWNORMAL); break;
- 
- case 5: ShellExecuteW(mainWnd,L"open",L"notepad.exe",logPath.c_str(),nullptr,SW_SHOWNORMAL); break;
+ case 0: case 1: case 2: case 3: case 4: case 5: ShowModulePanel(idx); break;
  }
 }
 static void ShowPage(Page p){
@@ -138,10 +135,32 @@ static void RefreshProcessList(){
   int at=(int)SendMessageW(processList,LB_ADDSTRING,0,(LPARAM)line);SendMessageW(processList,LB_SETITEMDATA,at,pe.th32ProcessID);
  }while(Process32NextW(snap,&pe));CloseHandle(snap);
 }
+static void RefreshLogList(){
+ if(!logList)return;
+ SendMessageW(logList,LB_RESETCONTENT,0,0);
+ std::wifstream f(logPath); std::wstring line;
+ if(!f){SendMessageW(logList,LB_ADDSTRING,0,(LPARAM)L"Журнал пока пуст.");return;}
+ while(std::getline(f,line))if(!line.empty())SendMessageW(logList,LB_ADDSTRING,0,(LPARAM)line.c_str());
+ if(SendMessageW(logList,LB_GETCOUNT,0,0)==0)SendMessageW(logList,LB_ADDSTRING,0,(LPARAM)L"Журнал пока пуст.");
+}
+static std::wstring DiagnosticsSummary(){
+ OSVERSIONINFOW os{};os.dwOSVersionInfoSize=sizeof(os);
+ using RtlGetVersionFn=LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+ auto rtl=(RtlGetVersionFn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlGetVersion");
+ if(rtl)rtl((PRTL_OSVERSIONINFOW)&os);
+ MEMORYSTATUSEX mem{};mem.dwLength=sizeof(mem);GlobalMemoryStatusEx(&mem);
+ ULONGLONG up=GetTickCount64()/1000;wchar_t b[1024]{};
+ swprintf_s(b,L"Windows %lu.%lu (сборка %lu)\nОЗУ: %llu из %llu ГБ занято (%.0f%%)\nВремя работы системы: %llu дн. %02llu ч. %02llu мин.\nЛогических процессоров: %lu",
+ os.dwMajorVersion,os.dwMinorVersion,os.dwBuildNumber,
+ (unsigned long long)((mem.ullTotalPhys-mem.ullAvailPhys)/1073741824ULL),
+ (unsigned long long)(mem.ullTotalPhys/1073741824ULL),(double)mem.dwMemoryLoad,
+ (unsigned long long)(up/86400),(unsigned long long)((up/3600)%24),(unsigned long long)((up/60)%60),GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+ return b;
+}
 static void ShowModulePanel(int idx){
  if(moduleWnd){DestroyWindow(moduleWnd);moduleWnd=nullptr;modeCombo=processList=nullptr;}
- const wchar_t* title=idx==0?L"J.A.R.V.I.S. — Системные режимы":idx==1?L"J.A.R.V.I.S. — Диспетчер процессов":idx==2?L"J.A.R.V.I.S. — Сетевой контроль":L"J.A.R.V.I.S. — Автоматические сценарии";
- int ww=idx==0?520:idx==1?720:idx==2?760:560,hh=idx==0?300:idx==1?550:idx==2?430:350;
+ const wchar_t* title=idx==0?L"J.A.R.V.I.S. — Системные режимы":idx==1?L"J.A.R.V.I.S. — Диспетчер процессов":idx==2?L"J.A.R.V.I.S. — Сетевой контроль":idx==3?L"J.A.R.V.I.S. — Диагностика Windows":idx==4?L"J.A.R.V.I.S. — Автоматические сценарии":L"J.A.R.V.I.S. — Журнал системы";
+ int ww=idx==0?520:idx==1?720:idx==2?760:idx==3?650:idx==4?560:760,hh=idx==0?300:idx==1?550:idx==2?430:idx==3?430:idx==4?350:520;
  activePanelIndex=idx;moduleWnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"JarvisModulePanel",title,WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,0,0,ww,hh,mainWnd,nullptr,GetModuleHandleW(nullptr),nullptr);
  if(!moduleWnd)return;RECT w{};SystemParametersInfoW(SPI_GETWORKAREA,0,&w,0);SetWindowPos(moduleWnd,HWND_TOPMOST,w.right-ww-20,w.top+80,ww,hh,SWP_SHOWWINDOW);
  if(idx==0){
@@ -163,6 +182,15 @@ static void ShowModulePanel(int idx){
   CreateWindowW(L"BUTTON",L"Настройки сети Windows",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,175,342,230,38,moduleWnd,(HMENU)533,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"STATIC",L"Для включения, отключения и настройки адаптеров используйте системное окно Windows.",WS_CHILD|WS_VISIBLE,18,390,700,24,moduleWnd,nullptr,nullptr,nullptr);
   RefreshNetworkList();if(networkAutoRefresh)SetTimer(moduleWnd,1,networkRefreshSeconds*1000,nullptr);
+  }else if(idx==3){
+  CreateWindowW(L"STATIC",L"Сводка состояния Windows:",WS_CHILD|WS_VISIBLE,22,18,580,26,moduleWnd,nullptr,nullptr,nullptr);
+  std::wstring summary=DiagnosticsSummary();
+  CreateWindowW(L"STATIC",summary.c_str(),WS_CHILD|WS_VISIBLE,24,54,590,125,moduleWnd,nullptr,nullptr,nullptr);
+  CreateWindowW(L"BUTTON",L"Монитор стабильности",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,205,180,40,moduleWnd,(HMENU)541,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Монитор ресурсов",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,220,205,180,40,moduleWnd,(HMENU)542,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Просмотр событий",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,416,205,180,40,moduleWnd,(HMENU)543,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Сведения о системе",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,260,180,40,moduleWnd,(HMENU)544,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"STATIC",L"Открываются встроенные средства диагностики Windows. Для некоторых разделов могут потребоваться права администратора.",WS_CHILD|WS_VISIBLE,24,325,590,48,moduleWnd,nullptr,nullptr,nullptr);
  }else if(idx==4){
   CreateWindowW(L"STATIC",L"Выберите сценарий — он применит реальные настройки Windows:",WS_CHILD|WS_VISIBLE,24,24,500,28,moduleWnd,nullptr,nullptr,nullptr);
   scenarioCombo=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,24,66,490,160,moduleWnd,(HMENU)521,GetModuleHandleW(nullptr),nullptr);
@@ -171,6 +199,12 @@ static void ShowModulePanel(int idx){
   CreateWindowW(L"BUTTON",L"Запустить сценарий",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,120,220,42,moduleWnd,(HMENU)522,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"STATIC",L"Игровой: высокая производительность + виджеты. Рабочий: сбалансированный режим. Энергосбережение: режим экономии + скрытие виджетов.",WS_CHILD|WS_VISIBLE,24,190,490,78,moduleWnd,nullptr,nullptr,nullptr);
   CreateWindowW(L"STATIC",L"Сценарий не закрывает программы и не меняет сетевые настройки.",WS_CHILD|WS_VISIBLE,24,275,490,24,moduleWnd,nullptr,nullptr,nullptr);
+ }else if(idx==5){
+  CreateWindowW(L"STATIC",L"История действий J.A.R.V.I.S. — новые события добавляются автоматически:",WS_CHILD|WS_VISIBLE,18,16,710,26,moduleWnd,nullptr,nullptr,nullptr);
+  logList=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOINTEGRALHEIGHT,18,50,710,360,moduleWnd,(HMENU)551,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Обновить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,428,140,38,moduleWnd,(HMENU)552,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Открыть файл журнала",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,175,428,210,38,moduleWnd,(HMENU)553,GetModuleHandleW(nullptr),nullptr);
+  RefreshLogList();
  }
 }
 static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
@@ -181,10 +215,16 @@ static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case 522:{int n=(int)SendMessageW(scenarioCombo,CB_GETCURSEL,0,0);if(n>=0&&n<3)RunScenario(n);return 0;}
  case 532:RefreshNetworkList();return 0;
  case 533:ShellExecuteW(h,L"open",L"ncpa.cpl",nullptr,nullptr,SW_SHOWNORMAL);return 0;
+ case 541:ShellExecuteW(h,L"open",L"perfmon.exe",L"/rel",nullptr,SW_SHOWNORMAL);return 0;
+ case 542:ShellExecuteW(h,L"open",L"resmon.exe",nullptr,nullptr,SW_SHOWNORMAL);return 0;
+ case 543:ShellExecuteW(h,L"open",L"eventvwr.msc",nullptr,nullptr,SW_SHOWNORMAL);return 0;
+ case 544:ShellExecuteW(h,L"open",L"msinfo32.exe",nullptr,nullptr,SW_SHOWNORMAL);return 0;
+ case 552:RefreshLogList();return 0;
+ case 553:ShellExecuteW(h,L"open",L"notepad.exe",logPath.c_str(),nullptr,SW_SHOWNORMAL);return 0;
  case 513:{int sel=(int)SendMessageW(processList,LB_GETCURSEL,0,0);if(sel==LB_ERR)return 0;DWORD pid=(DWORD)SendMessageW(processList,LB_GETITEMDATA,sel,0);wchar_t line[512]{};SendMessageW(processList,LB_GETTEXT,sel,(LPARAM)line);wchar_t name[260]{};swscanf_s(line,L"%259s",name,(unsigned)_countof(name));if(IsProtectedProcess(name,pid)){MessageBoxW(h,L"Этот системный процесс защищён от завершения.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}if(confirmProcessAction&&MessageBoxW(h,L"Завершить выбранный процесс? Несохранённые данные могут быть потеряны.",APP_NAME,MB_YESNO|MB_ICONWARNING)!=IDYES)return 0;HANDLE p=OpenProcess(PROCESS_TERMINATE,FALSE,pid);if(!p||!TerminateProcess(p,1)){if(p)CloseHandle(p);MessageBoxW(h,L"Не удалось завершить процесс. Возможно, нужны права администратора.",APP_NAME,MB_OK|MB_ICONWARNING);}else{CloseHandle(p);LogEvent(L"Завершён процесс PID "+std::to_wstring(pid));RefreshProcessList();}return 0;}
  }}
  if(m==WM_TIMER){if(activePanelIndex==1)RefreshProcessList();else if(activePanelIndex==2&&networkAutoRefresh)RefreshNetworkList();return 0;}
- if(m==WM_DESTROY){KillTimer(h,1);if(moduleWnd==h){moduleWnd=nullptr;activePanelIndex=-1;modeCombo=processList=networkList=scenarioCombo=nullptr;}return 0;}
+ if(m==WM_DESTROY){KillTimer(h,1);if(moduleWnd==h){moduleWnd=nullptr;activePanelIndex=-1;modeCombo=processList=networkList=scenarioCombo=logList=nullptr;}return 0;}
  return DefWindowProcW(h,m,wp,lp);
 }
 
