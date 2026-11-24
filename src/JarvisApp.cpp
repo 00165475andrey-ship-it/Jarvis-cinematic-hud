@@ -15,6 +15,8 @@
 #include <shellapi.h>
 #include <fstream>
 #include <ctime>
+#include <cwctype>
+#include <cstring>
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "PowrProf.lib")
@@ -234,7 +236,7 @@ static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case 512:RefreshProcessList();return 0;
  case 514:processSortMemory=!processSortMemory;RefreshProcessList();return 0;
  case 522:{int n=(int)SendMessageW(scenarioCombo,CB_GETCURSEL,0,0);if(n>=0&&n<3)RunScenario(n);return 0;}
- case 525:{customScenarioMode=(int)SendMessageW(GetDlgItem(h,523),CB_GETCURSEL,0,0);if(customScenarioMode<0)customScenarioMode=0;customScenarioHud=SendMessageW(GetDlgItem(h,524),BM_GETCHECK,0,0)==BST_CHECKED;Save();bool was=hudVisible;if(!ApplyPowerMode(customScenarioMode)){MessageBoxW(h,L"Не удалось применить выбранный план питания.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}preferredMode=customScenarioMode;bool show=customScenarioHud;if(hudVisible!=show)ToggleHud();LogEvent(L"Выполнен пользовательский сценарий");MessageBoxW(h,L"Пользовательский сценарий выполнен.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}
+ case 525:{customScenarioMode=(int)SendMessageW(GetDlgItem(h,523),CB_GETCURSEL,0,0);if(customScenarioMode<0)customScenarioMode=0;customScenarioHud=SendMessageW(GetDlgItem(h,524),BM_GETCHECK,0,0)==BST_CHECKED;Save();if(confirmScenarioRun&&MessageBoxW(h,L"Запустить пользовательский сценарий?",APP_NAME,MB_YESNO|MB_ICONQUESTION)!=IDYES)return 0;if(!ApplyPowerMode(customScenarioMode)){MessageBoxW(h,L"Не удалось применить выбранный план питания.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}preferredMode=customScenarioMode;bool show=customScenarioHud;if(hudVisible!=show)ToggleHud();LogEvent(L"Выполнен пользовательский сценарий");MessageBoxW(h,L"Пользовательский сценарий выполнен.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}
  case 532:RefreshNetworkList();return 0;
  case 533:ShellExecuteW(h,L"open",L"ncpa.cpl",nullptr,nullptr,SW_SHOWNORMAL);return 0;
  case 534:{int sel=(int)SendMessageW(networkList,LB_GETCURSEL,0,0);if(sel==LB_ERR){MessageBoxW(h,L"Сначала выберите сетевой адаптер.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}DWORD index=(DWORD)SendMessageW(networkList,LB_GETITEMDATA,sel,0);DWORD size=0;GetIfTable(nullptr,&size,FALSE);std::vector<BYTE> buf(size);auto*t=(MIB_IFTABLE*)buf.data();std::wstring out=L"Сведения о сетевом адаптере\r\nИндекс: "+std::to_wstring(index);if(size&&GetIfTable(t,&size,FALSE)==NO_ERROR)for(DWORD i=0;i<t->dwNumEntries;i++)if(t->table[i].dwIndex==index){const auto&r=t->table[i];out+=L"\r\nСостояние: ";out+=r.dwOperStatus==MIB_IF_OPER_STATUS_OPERATIONAL?L"Подключён":L"Не подключён";out+=L"\r\nПолучено: "+std::to_wstring(r.dwInOctets/1048576)+L" МБ\r\nОтправлено: "+std::to_wstring(r.dwOutOctets/1048576)+L" МБ";break;}CopyToClipboard(h,out);if(networkDetails)SetWindowTextW(networkDetails,L"Сведения об адаптере скопированы в буфер обмена.");return 0;}
