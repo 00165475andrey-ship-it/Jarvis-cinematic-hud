@@ -145,9 +145,7 @@ static void RefreshLogList(){
 }
 static std::wstring DiagnosticsSummary(){
  OSVERSIONINFOW os{};os.dwOSVersionInfoSize=sizeof(os);
- using RtlGetVersionFn=LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
- auto rtl=(RtlGetVersionFn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlGetVersion");
- if(rtl)rtl((PRTL_OSVERSIONINFOW)&os);
+ GetVersionExW(&os);
  MEMORYSTATUSEX mem{};mem.dwLength=sizeof(mem);GlobalMemoryStatusEx(&mem);
  ULONGLONG up=GetTickCount64()/1000;wchar_t b[1024]{};
  swprintf_s(b,L"Windows %lu.%lu (сборка %lu)\nОЗУ: %llu из %llu ГБ занято (%.0f%%)\nВремя работы системы: %llu дн. %02llu ч. %02llu мин.\nЛогических процессоров: %lu",
