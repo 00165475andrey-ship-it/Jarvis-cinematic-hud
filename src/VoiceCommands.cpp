@@ -166,6 +166,56 @@ std::string WideToUtf8(const std::wstring& s) {
     if(!WideCharToMultiByte(CP_UTF8,0,s.c_str(),(int)s.size(),&out[0],n,nullptr,nullptr)) return {};
     return out;
 }
+std::wstring UrlEncodeQuery(const std::wstring& query) {
+    const std::string utf8=WideToUtf8(query);
+    static const char hex[]="0123456789ABCDEF";
+    std::wstring encoded;
+    encoded.reserve(utf8.size()*3);
+    for(unsigned char ch:utf8) {
+        if((ch>='a'&&ch<='z') || (ch>='A'&&ch<='Z') ||
+           (ch>='0'&&ch<='9') || ch=='-' || ch=='_' || ch=='.' || ch=='~') {
+            encoded.push_back((wchar_t)ch);
+        } else if(ch==' ') {
+            encoded.push_back(L'+');
+        } else {
+            encoded.push_back(L'%');
+            encoded.push_back((wchar_t)hex[ch>>4]);
+            encoded.push_back((wchar_t)hex[ch&0x0f]);
+        }
+    }
+    return encoded;
+}
+
+bool TryQuickYandexSearch(const std::wstring& recognized) {
+    const std::wstring normalized=TrimLower(recognized);
+    const wchar_t* prefixes[]={
+        L"найди в яндексе", L"поищи в яндексе", L"поиск в яндексе"
+    };
+    for(const wchar_t* prefix:prefixes) {
+        const size_t length=wcslen(prefix);
+        if(normalized.compare(0,length,prefix)!=0) continue;
+        if(normalized.size()>length && !iswspace(normalized[length])) continue;
+
+        std::wstring query=recognized.substr(length);
+        while(!query.empty() && iswspace(query.front())) query.erase(query.begin());
+        while(!query.empty() && iswspace(query.back())) query.pop_back();
+        if(query.empty()) {
+            SetStatus(L"Скажите, что именно найти в Яндексе");
+            return true;
+        }
+        if(query.size()>500) {
+            SetStatus(L"Поисковый запрос слишком длинный (максимум 500 символов)");
+            return true;
+        }
+
+        const std::wstring url=L"https://yandex.ru/search/?text="+UrlEncodeQuery(query);
+        HINSTANCE result=ShellExecuteW(g_window,L"open",url.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+        SetStatus((INT_PTR)result>32 ? L"Открываю поиск Яндекса: "+query : L"Не удалось открыть браузер для поиска");
+        return true;
+    }
+    return false;
+}
+
 bool ReadAll(const std::wstring& path,std::string& data) {
     HANDLE f=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(f==INVALID_HANDLE_VALUE) return false;
@@ -217,6 +267,7 @@ bool SaveMacros() {
     return WriteAll(g_macroFile,WideToUtf8(all));
 }
 void ExecuteExact(const std::wstring& recognized) {
+    if(TryQuickYandexSearch(recognized)) return;
     const std::wstring key=NormalizeCommand(recognized);
     if(key.empty()) return;
     Macro found;
