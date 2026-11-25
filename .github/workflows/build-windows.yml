@@ -22,9 +22,12 @@ jobs:
           @'
           J.A.R.V.I.S. Desktop
           Запустите JarvisDesktop.exe. Настройки сохраняются в jarvis.ini рядом с программой.
-          Windows 7 SP1 x64 / Windows 10/11 x64. Windows 7 compatibility depends on required system updates and must be validated on a Windows 7 machine.
+          Windows x64 package. Windows 10/11 are primary targets. Windows 7 SP1 compatibility is experimental and requires a real-machine test.
           '@ | Set-Content package/README.txt -Encoding UTF8
           ./tools/prepare-vosk.ps1 -Destination package
+          if (-not (Test-Path package/libvosk.dll)) { throw "Vosk runtime missing from package" }
+          if (-not (Test-Path package/models/vosk-model-small-ru-0.22/am/final.mdl)) { throw "Russian Vosk model missing from package" }
+          if (-not (Test-Path package/models/vosk-model-small-ru-0.22/graph/Gr.fst)) { throw "Vosk language graph missing from package" }
           Compress-Archive -Path package/* -DestinationPath JARVIS-Desktop-Windows-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
