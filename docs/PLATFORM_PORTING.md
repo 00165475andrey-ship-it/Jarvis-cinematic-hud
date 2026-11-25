@@ -34,3 +34,13 @@
 - Проверены отключение/повторное подключение микрофона, длительное прослушивание и корректное завершение приложения.
 
 Успешная CI-сборка не заменяет проверку на физическом компьютере.
+
+
+## Automated compatibility checks
+
+Workflow `Platform compatibility checks` runs on Linux, macOS and Windows:
+- Linux and macOS must be rejected by CMake with the explicit Win32-porting explanation.
+- Windows x86 must be rejected with the explicit x64-only explanation.
+- Separate Windows x64 and Windows 7 workflows perform the actual application build and package the Vosk runtime/model.
+
+These guard checks confirm that unsupported targets are identified correctly. They do not mean that a Linux/macOS application build or runtime test exists.
