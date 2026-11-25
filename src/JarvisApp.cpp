@@ -250,7 +250,7 @@ static void ShowModulePanel(int idx){
  struct PanelScaleContext{double scale;};
  auto scaleChild=[](HWND child,LPARAM lp)->BOOL{auto*c=(PanelScaleContext*)lp;RECT r{};GetWindowRect(child,&r);MapWindowPoints(nullptr,moduleWnd,(POINT*)&r,2);SetWindowPos(child,nullptr,(int)(r.left*c->scale),(int)(r.top*c->scale),(int)((r.right-r.left)*c->scale),(int)((r.bottom-r.top)*c->scale),SWP_NOZORDER|SWP_NOACTIVATE);return TRUE;};
  PanelScaleContext pc{panelDensity[idx]==0?0.90:panelDensity[idx]==2?1.10:1.0};EnumChildWindows(moduleWnd,scaleChild,(LPARAM)&pc);
- RECT client{};GetClientRect(moduleWnd,&client);HWND gear=CreateWindowW(L"BUTTON",L"⚙ Настройки",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,client.right-116,4,108,26,moduleWnd,(HMENU)590,GetModuleHandleW(nullptr),nullptr);if(gear)SendMessageW(gear,WM_SETFONT,(WPARAM)moduleStyleFont,TRUE);
+ RECT client{};GetClientRect(moduleWnd,&client);HWND gear=CreateWindowW(L"BUTTON",L"⚙",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,client.right-36,4,30,26,moduleWnd,(HMENU)590,GetModuleHandleW(nullptr),nullptr);if(gear)SendMessageW(gear,WM_SETFONT,(WPARAM)moduleStyleFont,TRUE);
  ShowWindow(moduleWnd,SW_SHOWNOACTIVATE);if(cfg.animations)AnimateWindow(moduleWnd,140,AW_BLEND|AW_ACTIVATE);
 }
 static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
