@@ -1,0 +1,52 @@
+name: Platform compatibility checks
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unix-platform-guard:
+    name: Verify explicit unsupported-platform message (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${expr}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Linux/macOS platform guard
+        shell: bash
+        run: |
+          set +e
+          output=$(cmake -S . -B build 2>&1)
+          status=$?
+          set -e
+          printf '%s\\n' "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: unsupported platform unexpectedly configured successfully."
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -F "currently uses Win32 APIs" >/dev/null; then
+            echo "ERROR: expected platform compatibility message was not shown."
+            exit 1
+          fi
+          echo "PASS: platform is rejected with a clear explanation."
+  windows-x86-guard:
+    name: Verify Windows x86 is rejected
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Windows x86 architecture guard
+        shell: pwsh
+        run: |
+          $output = cmake -S . -B build-x86 -A Win32 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Host $output
+          if ($status -eq 0) {
+            throw "Windows x86 unexpectedly configured successfully."
+          }
+          if ($output -notmatch "Only Windows x64 is supported") {
+            throw "Expected Windows x86 compatibility message was not shown."
+          }
+          Write-Host "PASS: Windows x86 is rejected with a clear explanation."
