@@ -12,6 +12,8 @@
 #include <cwctype>
 #include <cstring>
 #include <cstdint>
+#include <cstdlib>
+#include <cmath>
 
 #pragma comment(lib, "Winmm.lib")
 #pragma comment(lib, "Shell32.lib")
@@ -22,7 +24,7 @@ constexpr UINT WM_VOICE_KEYSTATE = WM_APP + 72;
 constexpr int ID_VOICE_START=701, ID_VOICE_STOP=702, ID_VOICE_PHRASE=703,
               ID_VOICE_TARGET=704, ID_VOICE_ADD=705, ID_VOICE_LIST=706,
               ID_VOICE_DELETE=707, ID_VOICE_MODE=708, ID_VOICE_HOTKEY=709,
-              ID_VOICE_STATUS_LABEL=710;
+              ID_VOICE_STATUS_LABEL=710, ID_VOICE_SENSITIVITY=711, ID_VOICE_CONFIDENCE=712;
 
 using ModelNew = void* (__cdecl*)(const char*);
 using ModelFree = void (__cdecl*)(void*);
@@ -31,6 +33,7 @@ using RecFree = void (__cdecl*)(void*);
 using Accept = int (__cdecl*)(void*, const char*, int);
 using Result = const char* (__cdecl*)(void*);
 using RecReset = void (__cdecl*)(void*);
+using RecSetWords = void (__cdecl*)(void*, int);
 struct Api {
     HMODULE dll{};
     ModelNew modelNew{};
@@ -42,6 +45,7 @@ struct Api {
     Result partial{};
     Result finalResult{};
     RecReset reset{};
+    RecSetWords setWords{};
 };
 struct Macro { std::wstring phrase, target; };
 
@@ -50,6 +54,8 @@ HHOOK g_keyboardHook{};
 std::wstring g_base, g_macroFile, g_settingsFile;
 std::atomic<int> g_listenMode{0}; // 0 = continuous, 1 = push-to-talk
 std::atomic<int> g_pttKey{VK_F7};
+std::atomic<int> g_sensitivity{65};
+std::atomic<int> g_confidence{35};
 std::atomic<bool> g_pttHeld{false};
 std::vector<Macro> g_macros;
 std::mutex g_macroMutex, g_statusMutex;
@@ -74,12 +80,18 @@ void LoadVoiceSettings() {
     int key=GetPrivateProfileIntW(L"Voice",L"PushToTalkKey",VK_F7,g_settingsFile.c_str());
     if(key<=0 || key>255) key=VK_F7;
     g_pttKey=key;
+    g_sensitivity=std::clamp(GetPrivateProfileIntW(L"Voice",L"Sensitivity",65,g_settingsFile.c_str()),0,100);
+    g_confidence=std::clamp(GetPrivateProfileIntW(L"Voice",L"Confidence",35,g_settingsFile.c_str()),0,100);
 }
 void SaveVoiceSettings() {
     const std::wstring mode=std::to_wstring(g_listenMode.load());
     const std::wstring key=std::to_wstring(g_pttKey.load());
     WritePrivateProfileStringW(L"Voice",L"Mode",mode.c_str(),g_settingsFile.c_str());
     WritePrivateProfileStringW(L"Voice",L"PushToTalkKey",key.c_str(),g_settingsFile.c_str());
+    const std::wstring sensitivity=std::to_wstring(g_sensitivity.load());
+    const std::wstring confidence=std::to_wstring(g_confidence.load());
+    WritePrivateProfileStringW(L"Voice",L"Sensitivity",sensitivity.c_str(),g_settingsFile.c_str());
+    WritePrivateProfileStringW(L"Voice",L"Confidence",confidence.c_str(),g_settingsFile.c_str());
 }
 void SetStatus(const std::wstring& s) {
     { std::lock_guard<std::mutex> lock(g_statusMutex); g_status=s; }
@@ -247,13 +259,34 @@ bool JsonStringField(const std::string& json,const char* key,std::string& value)
     }
     return false;
 }
+double JsonAverageConfidence(const std::string& json) {
+    size_t p=0; double sum=0.0; unsigned count=0;
+    while((p=json.find("\"conf\":",p))!=std::string::npos) {
+        p+=7; char* end=nullptr;
+        double value=std::strtod(json.c_str()+p,&end);
+        if(end==json.c_str()+p) break;
+        if(value>=0.0 && value<=1.0) { sum+=value; ++count; }
+        p=(size_t)(end-json.c_str());
+    }
+    return count ? sum/count : -1.0;
+}
 void ProcessResultJson(const char* json) {
     if(!json) return;
     std::string text;
-    if(JsonStringField(json,"text",text)) {
-        std::wstring phrase=Utf8ToWide(text);
-        if(!TrimLower(phrase).empty()) ExecuteExact(phrase);
+    if(!JsonStringField(json,"text",text)) return;
+    std::wstring phrase=Utf8ToWide(text);
+    if(TrimLower(phrase).empty()) return;
+    const double confidence=JsonAverageConfidence(json);
+    const int required=g_confidence.load();
+    if(confidence>=0.0 && confidence*100.0<required) {
+        SetStatus(L"Низкая уверенность распознавания. Повторите фразу.");
+        return;
     }
+    if(confidence<0.0 && required>0) {
+        SetStatus(L"Нет данных об уверенности. Команда не выполнена.");
+        return;
+    }
+    ExecuteExact(phrase);
 }
 void ProcessPartialJson(const char* json) {
     if(!json) return;
@@ -277,7 +310,8 @@ bool LoadApi(Api& a) {
     a.partial=(Result)GetProcAddress(a.dll,"vosk_recognizer_partial_result");
     a.finalResult=(Result)GetProcAddress(a.dll,"vosk_recognizer_final_result");
     a.reset=(RecReset)GetProcAddress(a.dll,"vosk_recognizer_reset");
-    return a.modelNew&&a.modelFree&&a.recNew&&a.recFree&&a.accept&&a.result&&a.partial&&a.finalResult&&a.reset;
+    a.setWords=(RecSetWords)GetProcAddress(a.dll,"vosk_recognizer_set_words");
+    return a.modelNew&&a.modelFree&&a.recNew&&a.recFree&&a.accept&&a.result&&a.partial&&a.finalResult&&a.reset&&a.setWords;
 }
 void Worker() {
     Api api{};
@@ -319,6 +353,8 @@ void Worker() {
         SetStatus(L"Не удалось создать распознаватель Vosk");
         cleanup(); g_running=false; return;
     }
+
+    api.setWords(rec,1);
 
     WAVEFORMATEX fmt{};
     fmt.wFormatTag=WAVE_FORMAT_PCM;
@@ -373,6 +409,15 @@ void Worker() {
             WAVEHDR& h=headers[i];
             if(!(h.dwFlags&WHDR_DONE)) continue;
             if(h.dwBytesRecorded>0 && ((g_listenMode.load()==0) || g_pttHeld.load())) {
+                // Configurable noise gate for signed 16-bit mono PCM.
+                const int gate=(100-g_sensitivity.load())*8;
+                short* samples=reinterpret_cast<short*>(h.lpData);
+                const size_t count=h.dwBytesRecorded/sizeof(short);
+                long long squares=0;
+                for(size_t k=0;k<count;++k) squares+=(long long)samples[k]*samples[k];
+                const double rms=count?std::sqrt((double)squares/count):0.0;
+                const int threshold=std::max(gate,(int)(rms*0.035));
+                for(size_t k=0;k<count;++k) if(std::abs((int)samples[k])<threshold) samples[k]=0;
                 int accepted=api.accept(rec,h.lpData,(int)h.dwBytesRecorded);
                 if(accepted<0) {
                     SetStatus(L"Vosk сообщил об ошибке обработки аудио");
@@ -438,12 +483,18 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         int selected=1;
         for(int i=0;i<10;i++){int n=(int)SendMessageW(hotkey,CB_ADDSTRING,0,(LPARAM)names[i]);SendMessageW(hotkey,CB_SETITEMDATA,n,keys[i]);if(keys[i]==g_pttKey.load())selected=i;}
         SendMessageW(hotkey,CB_SETCURSEL,selected,0);
+        CreateWindowW(L"STATIC",L"Чувствительность (0–100)",WS_CHILD|WS_VISIBLE,18,224,210,20,h,nullptr,nullptr,nullptr);
+        wchar_t sens[16]{}; wsprintfW(sens,L"%d",g_sensitivity.load());
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",sens,WS_CHILD|WS_VISIBLE|ES_NUMBER,230,220,45,25,h,(HMENU)(INT_PTR)ID_VOICE_SENSITIVITY,nullptr,nullptr);
+        CreateWindowW(L"STATIC",L"Мин. уверенность (0–100%)",WS_CHILD|WS_VISIBLE,340,224,220,20,h,nullptr,nullptr,nullptr);
+        wchar_t conf[16]{}; wsprintfW(conf,L"%d",g_confidence.load());
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",conf,WS_CHILD|WS_VISIBLE|ES_NUMBER,565,220,45,25,h,(HMENU)(INT_PTR)ID_VOICE_CONFIDENCE,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_ADD,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,172,184,160,34,h,(HMENU)(INT_PTR)ID_VOICE_DELETE,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,344,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_START,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,500,184,100,34,h,(HMENU)(INT_PTR)ID_VOICE_STOP,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,232,598,245,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
-        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,490,598,48,h,(HMENU)(INT_PTR)ID_VOICE_STATUS_LABEL,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,260,598,245,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
+        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,515,598,48,h,(HMENU)(INT_PTR)ID_VOICE_STATUS_LABEL,nullptr,nullptr);
         g_keyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,KeyboardHookProc,GetModuleHandleW(nullptr),0);
         RefreshList();
         return 0;
@@ -454,6 +505,18 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         case ID_VOICE_STOP: Stop(); return 0;
         case ID_VOICE_MODE: if(HIWORD(wp)==CBN_SELCHANGE){int n=(int)SendDlgItemMessageW(h,ID_VOICE_MODE,CB_GETCURSEL,0,0);g_listenMode=n==1?1:0;g_pttHeld=false;SaveVoiceSettings();SetStatus(g_listenMode.load()?L"Push-to-Talk: удерживайте выбранную клавишу":L"Постоянное прослушивание");return 0;}
         case ID_VOICE_HOTKEY: if(HIWORD(wp)==CBN_SELCHANGE){HWND cb=GetDlgItem(h,ID_VOICE_HOTKEY);int n=(int)SendMessageW(cb,CB_GETCURSEL,0,0);if(n!=CB_ERR){g_pttKey=(int)SendMessageW(cb,CB_GETITEMDATA,n,0);SaveVoiceSettings();}return 0;}
+        case ID_VOICE_SENSITIVITY:
+        case ID_VOICE_CONFIDENCE: {
+            wchar_t value[16]{}; GetWindowTextW(GetDlgItem(h,LOWORD(wp)),value,16);
+            wchar_t* end=nullptr; long parsed=wcstol(value,&end,10);
+            if(end!=value && *end==0) {
+                parsed=std::clamp(parsed,0L,100L);
+                if(LOWORD(wp)==ID_VOICE_SENSITIVITY) g_sensitivity=(int)parsed;
+                else g_confidence=(int)parsed;
+                SaveVoiceSettings();
+            }
+            return 0;
+        }
         case ID_VOICE_ADD: {
             wchar_t phrase[256]{},target[512]{};
             GetDlgItemTextW(h,ID_VOICE_PHRASE,phrase,256);
@@ -549,6 +612,6 @@ void OpenVoiceCommands(HWND owner,const std::wstring& basePath) {
         if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return;
         registered=true;
     }
-    HWND w=CreateWindowExW(WS_EX_TOOLWINDOW,L"JarvisVoiceCommandsWindow",L"J.A.R.V.I.S. — Голосовые макросы",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,650,525,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
+    HWND w=CreateWindowExW(WS_EX_TOOLWINDOW,L"JarvisVoiceCommandsWindow",L"J.A.R.V.I.S. — Голосовые макросы",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,650,600,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(w) { ShowWindow(w,SW_SHOWNORMAL); UpdateWindow(w); }
 }
