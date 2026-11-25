@@ -143,7 +143,7 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
    std::wstring p=TrimLower(phrase);if(p.empty()||!target[0]||wcschr(phrase,L'|')||wcschr(target,L'|')){MessageBoxW(h,L"Введите фразу и адрес/путь. Символ | не допускается.",L"J.A.R.V.I.S.",MB_OK|MB_ICONWARNING);return 0;}
    {std::lock_guard<std::mutex> lock(g_macroMutex);if(g_macros.size()>=100){MessageBoxW(h,L"Лимит — 100 макросов.",L"J.A.R.V.I.S.",MB_OK|MB_ICONINFORMATION);return 0;}g_macros.push_back({phrase,target});}
    SaveMacros();RefreshList();return 0;}
-  case ID_VOICE_DELETE:{int n=(int)SendDlgItemMessageW(h,ID_VOICE_LIST,LB_GETCURSEL,0,0);if(n!=LB_ERR){std::lock_guard<std::mutex> lock(g_macroMutex);if(n<(int)g_macros.size())g_macros.erase(g_macros.begin()+n);SaveMacros();RefreshList();}return 0;}
+  case ID_VOICE_DELETE:{int n=(int)SendDlgItemMessageW(h,ID_VOICE_LIST,LB_GETCURSEL,0,0);if(n!=LB_ERR){{std::lock_guard<std::mutex> lock(g_macroMutex);if(n<(int)g_macros.size())g_macros.erase(g_macros.begin()+n);}SaveMacros();RefreshList();}return 0;}
  }}
  if(msg==WM_VOICE_STATUS){HWND st=GetDlgItem(h,708);if(st)SetWindowTextW(st,g_status.c_str());return 0;}
  if(msg==WM_CLOSE){Stop();if(g_worker.joinable())g_worker.join();DestroyWindow(h);return 0;}
