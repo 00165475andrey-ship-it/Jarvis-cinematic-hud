@@ -24,6 +24,7 @@ jobs:
           Запустите JarvisDesktop.exe. Настройки сохраняются в jarvis.ini рядом с программой.
           Windows 10/11 x64.
           '@ | Set-Content package/README.txt -Encoding UTF8
+          ./tools/prepare-vosk.ps1 -Destination package
           Compress-Archive -Path package/* -DestinationPath JARVIS-Desktop-Windows-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
