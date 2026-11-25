@@ -155,10 +155,14 @@ static void SaveUserScenarios(){
  std::wofstream f(scenarioPath,std::ios::trunc);if(!f)return;
  for(const auto&v:userScenarios){std::wstring name=v.name;std::replace(name.begin(),name.end(),L'|',L'-');std::replace(name.begin(),name.end(),L'\\',L' ');f<<name<<L'|'<<v.powerMode<<L'|'<<(v.showHud?1:0)<<L"\n";}
 }
+static void LoadScenarioEditorSelection(){
+ if(!moduleWnd)return;int n=(int)SendMessageW(GetDlgItem(moduleWnd,526),LB_GETCURSEL,0,0);if(n<0||n>=(int)userScenarios.size())return;
+ const auto&v=userScenarios[n];SetDlgItemTextW(moduleWnd,527,v.name.c_str());SendMessageW(GetDlgItem(moduleWnd,528),CB_SETCURSEL,v.powerMode,0);SendMessageW(GetDlgItem(moduleWnd,529),BM_SETCHECK,v.showHud?BST_CHECKED:BST_UNCHECKED,0);
+}
 static void RefreshScenarioEditor(){
  HWND list=GetDlgItem(moduleWnd,526);if(!list)return;SendMessageW(list,LB_RESETCONTENT,0,0);
  for(const auto&v:userScenarios)SendMessageW(list,LB_ADDSTRING,0,(LPARAM)v.name.c_str());
- if(!userScenarios.empty())SendMessageW(list,LB_SETCURSEL,0,0);
+ if(!userScenarios.empty()){SendMessageW(list,LB_SETCURSEL,0,0);LoadScenarioEditorSelection();}
 }
 static bool RunUserScenario(int index){
  if(index<0||index>=(int)userScenarios.size())return false;
@@ -322,6 +326,7 @@ static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case 553:ShellExecuteW(h,L"open",L"notepad.exe",logPath.c_str(),nullptr,SW_SHOWNORMAL);return 0;
  case 513:{int sel=(int)SendMessageW(processList,LB_GETCURSEL,0,0);if(sel==LB_ERR)return 0;DWORD pid=(DWORD)SendMessageW(processList,LB_GETITEMDATA,sel,0);wchar_t line[512]{};SendMessageW(processList,LB_GETTEXT,sel,(LPARAM)line);wchar_t name[260]{};swscanf_s(line,L"%259s",name,(unsigned)_countof(name));if(IsProtectedProcess(name,pid)){MessageBoxW(h,L"Этот системный процесс защищён от завершения.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}if(confirmProcessAction&&MessageBoxW(h,L"Завершить выбранный процесс? Несохранённые данные могут быть потеряны.",APP_NAME,MB_YESNO|MB_ICONWARNING)!=IDYES)return 0;HANDLE p=OpenProcess(PROCESS_TERMINATE,FALSE,pid);if(!p||!TerminateProcess(p,1)){if(p)CloseHandle(p);MessageBoxW(h,L"Не удалось завершить процесс. Возможно, нужны права администратора.",APP_NAME,MB_OK|MB_ICONWARNING);}else{CloseHandle(p);LogEvent(L"Завершён процесс PID "+std::to_wstring(pid));RefreshProcessList();}return 0;}
  }}
+ if(m==WM_COMMAND&&LOWORD(wp)==526&&HIWORD(wp)==LBN_SELCHANGE){LoadScenarioEditorSelection();return 0;}
  if(m==WM_COMMAND&&LOWORD(wp)==515&&HIWORD(wp)==EN_CHANGE){RefreshProcessList();return 0;}
  if(m==WM_COMMAND&&LOWORD(wp)==554&&HIWORD(wp)==EN_CHANGE){RefreshLogList();return 0;}
  if(m==WM_TIMER){if(activePanelIndex==1)RefreshProcessList();else if(activePanelIndex==2&&networkAutoRefresh)RefreshNetworkList();else if(activePanelIndex==3&&diagnosticsAutoRefresh&&diagnosticsText){std::wstring v=DiagnosticsSummary();SetWindowTextW(diagnosticsText,v.c_str());}else if(activePanelIndex==5&&logAutoRefresh)RefreshLogList();return 0;}
