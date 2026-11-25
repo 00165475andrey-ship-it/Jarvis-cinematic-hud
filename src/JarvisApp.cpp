@@ -17,11 +17,13 @@
 #include <ctime>
 #include <cwctype>
 #include <cstring>
+#include <pdh.h>
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "PowrProf.lib")
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "Pdh.lib")
 static constexpr wchar_t APP_NAME[]=L"J.A.R.V.I.S. Desktop";
 enum { ID_DASH=100, ID_APPEAR=101, ID_BEHAVIOR=102, ID_ABOUT=103, ID_APPLY=110, ID_OPACITY=120, ID_WIDTH=121, ID_HEIGHT=122, ID_POSITION=123, ID_ANIM=124, ID_MOUSE=125, ID_REACTOR=126, ID_DECOR=127, ID_AUTOSTART=128, ID_HUD_TOGGLE=130, ID_MODULE_BASE=140 };
 enum Page { DASHBOARD, APPEARANCE, BEHAVIOR, ABOUT };
@@ -31,7 +33,7 @@ static bool moduleEnabled[MODULE_COUNT]={true,true,false,false,false,false};
 struct Config { int opacity=90,width=1120,height=900,position=0; bool animations=true,mouse=true,reactor=true,decorations=true,autostart=false; };
 static double mainLayoutScaleX=1.0,mainLayoutScaleY=1.0;
 static bool hudHovered[9]{};
-static Config cfg; static HWND mainWnd,nav[4],controls[64],applyButton; static HFONT moduleStyleFont=nullptr; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true; static int networkRefreshSeconds=2,scenarioDefault=0,diagnosticsRefreshSeconds=5,logRefreshSeconds=2; static int panelTheme[MODULE_COUNT]={0,0,0,0,0,0},panelFont[MODULE_COUNT]={1,1,1,1,1,1},panelOpacity[MODULE_COUNT]={95,95,95,95,95,95},panelDensity[MODULE_COUNT]={1,1,1,1,1,1}; static bool showDisconnectedInterfaces=false,networkAutoRefresh=true,confirmScenarioRun=true,restoreHudAfterScenario=false,diagnosticsAutoRefresh=true,diagnosticsDetailed=true,logAutoRefresh=true,logNewestFirst=true; static HWND moduleWnd=nullptr,modeCombo=nullptr,modeStatus=nullptr,processList=nullptr,processSearch=nullptr,networkList=nullptr,networkDetails=nullptr,scenarioCombo=nullptr,logList=nullptr,logSearch=nullptr,diagnosticsText=nullptr; static int activePanelIndex=-1; static bool processSortMemory=false; static int customScenarioMode=0; static bool customScenarioHud=true; static GUID previousPowerScheme{}; static bool havePreviousPowerScheme=false;
+static Config cfg; static HWND mainWnd,nav[4],controls[64],applyButton; static HFONT moduleStyleFont=nullptr; static Page page=DASHBOARD; static int moduleSettings=-1; static int preferredMode=0,processRefresh=1; static bool modeDefault=false,showSystemProcesses=false,confirmProcessAction=true; static int networkRefreshSeconds=2,scenarioDefault=0,diagnosticsRefreshSeconds=5,logRefreshSeconds=2; static int panelTheme[MODULE_COUNT]={0,0,0,0,0,0},panelFont[MODULE_COUNT]={1,1,1,1,1,1},panelOpacity[MODULE_COUNT]={95,95,95,95,95,95},panelDensity[MODULE_COUNT]={1,1,1,1,1,1}; static bool showDisconnectedInterfaces=false,networkAutoRefresh=true,confirmScenarioRun=true,restoreHudAfterScenario=false,diagnosticsAutoRefresh=true,diagnosticsDetailed=true,logAutoRefresh=true,logNewestFirst=true; static HWND moduleWnd=nullptr,modeCombo=nullptr,modeStatus=nullptr,processList=nullptr,processSearch=nullptr,networkList=nullptr,networkDetails=nullptr,scenarioCombo=nullptr,logList=nullptr,logSearch=nullptr,diagnosticsText=nullptr; static int activePanelIndex=-1; static bool processSortMemory=false; static int customScenarioMode=0; static bool customScenarioHud=true; struct UserScenario{std::wstring name;int powerMode=0;bool showHud=true;}; static std::vector<UserScenario> userScenarios; static PDH_HQUERY gpuQuery=nullptr; static PDH_HCOUNTER gpuCounter=nullptr; static bool gpuCounterReady=false; static GUID previousPowerScheme{}; static bool havePreviousPowerScheme=false;
 static HFONT titleFont,normalFont,smallFont; static HWND aboutControls[4]{}; static COLORREF bg=RGB(9,15,25),panel=RGB(16,27,42),cyan=RGB(0,205,245),muted=RGB(135,160,180);
 static std::wstring iniPath; static std::wstring logPath, scenarioPath; static int cpuValue=0,ramValue=0; static ULONGLONG oldIdle=0,oldKernel=0,oldUser=0; static bool cpuReady=false;
 static std::wstring IniPath(){wchar_t p[MAX_PATH]{};GetModuleFileNameW(nullptr,p,MAX_PATH);std::wstring s(p);auto n=s.find_last_of(L"\\/");return (n==s.npos?L"":s.substr(0,n+1))+L"jarvis.ini";}
@@ -145,6 +147,36 @@ static void RunScenario(int scenario){
  LogEvent(std::wstring(L"Выполнен сценарий: ")+names[scenario]);
  MessageBoxW(moduleWnd,details[scenario],names[scenario],MB_OK|MB_ICONINFORMATION);
 }
+static void LoadUserScenarios(){
+ userScenarios.clear();std::wifstream f(scenarioPath);std::wstring line;
+ while(std::getline(f,line)&&userScenarios.size()<12){size_t a=line.find(L'|'),b=a==line.npos?line.npos:line.find(L'|',a+1);if(a==line.npos||b==line.npos)continue;UserScenario v;v.name=line.substr(0,a);try{v.powerMode=std::clamp(std::stoi(line.substr(a+1,b-a-1)),0,2);}catch(...){continue;}v.showHud=line.substr(b+1)==L"1";if(!v.name.empty())userScenarios.push_back(v);}
+}
+static void SaveUserScenarios(){
+ std::wofstream f(scenarioPath,std::ios::trunc);if(!f)return;
+ for(const auto&v:userScenarios){std::wstring name=v.name;std::replace(name.begin(),name.end(),L'|',L'-');std::replace(name.begin(),name.end(),L'\\',L' ');f<<name<<L'|'<<v.powerMode<<L'|'<<(v.showHud?1:0)<<L"\n";}
+}
+static void RefreshScenarioEditor(){
+ HWND list=GetDlgItem(moduleWnd,526);if(!list)return;SendMessageW(list,LB_RESETCONTENT,0,0);
+ for(const auto&v:userScenarios)SendMessageW(list,LB_ADDSTRING,0,(LPARAM)v.name.c_str());
+ if(!userScenarios.empty())SendMessageW(list,LB_SETCURSEL,0,0);
+}
+static bool RunUserScenario(int index){
+ if(index<0||index>=(int)userScenarios.size())return false;
+ const auto v=userScenarios[index];if(confirmScenarioRun&&MessageBoxW(moduleWnd,(L"Запустить сценарий «"+v.name+L"»?").c_str(),APP_NAME,MB_YESNO|MB_ICONQUESTION)!=IDYES)return false;
+ if(!ApplyPowerMode(v.powerMode)){MessageBoxW(moduleWnd,L"Не удалось применить выбранный план питания.",APP_NAME,MB_OK|MB_ICONWARNING);return false;}
+ preferredMode=v.powerMode;Save();if(hudVisible!=v.showHud)ToggleHud();LogEvent(L"Выполнен пользовательский сценарий: "+v.name);
+ MessageBoxW(moduleWnd,L"Сценарий выполнен.",APP_NAME,MB_OK|MB_ICONINFORMATION);return true;
+}
+static std::wstring GpuUsageText(){
+ if(!gpuQuery){if(PdhOpenQueryW(nullptr,0,&gpuQuery)!=ERROR_SUCCESS)return L"недоступно";if(PdhAddEnglishCounterW(gpuQuery,L"\\GPU Engine(*)\\Utilization Percentage",0,&gpuCounter)!=ERROR_SUCCESS){PdhCloseQuery(gpuQuery);gpuQuery=nullptr;gpuCounter=nullptr;return L"нет счётчика GPU (Windows/драйвер)";}}
+ if(PdhCollectQueryData(gpuQuery)!=ERROR_SUCCESS)return L"недоступно";
+ DWORD bytes=0,count=0;PDH_STATUS st=PdhGetFormattedCounterArrayW(gpuCounter,PDH_FMT_DOUBLE,&bytes,&count,nullptr);
+ if(st!=PDH_MORE_DATA||bytes==0)return L"сбор данных...";
+ std::vector<BYTE> buffer(bytes);auto*items=(PDH_FMT_COUNTERVALUE_ITEM_W*)buffer.data();
+ if(PdhGetFormattedCounterArrayW(gpuCounter,PDH_FMT_DOUBLE,&bytes,&count,items)!=ERROR_SUCCESS)return L"недоступно";
+ double total=0;for(DWORD i=0;i<count;i++)if(items[i].FmtValue.CStatus==PDH_CSTATUS_VALID_DATA||items[i].FmtValue.CStatus==PDH_CSTATUS_NEW_DATA)total+=items[i].FmtValue.doubleValue;
+ wchar_t out[64];swprintf_s(out,L"%.0f%%",std::clamp(total,0.0,100.0));return out;
+}
 static void RefreshProcessList(){
  if(!processList)return;SendMessageW(processList,LB_RESETCONTENT,0,0);
  wchar_t query[256]{};if(processSearch)GetWindowTextW(processSearch,query,256);
@@ -179,14 +211,14 @@ static std::wstring DiagnosticsSummary(){
  (unsigned long long)((mem.ullTotalPhys-mem.ullAvailPhys)/1073741824ULL),
  (unsigned long long)(mem.ullTotalPhys/1073741824ULL),(double)mem.dwMemoryLoad,
  (unsigned long long)(up/86400),(unsigned long long)((up/3600)%24),(unsigned long long)((up/60)%60),GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
- if(!diagnosticsDetailed){wchar_t shortText[256]{};swprintf_s(shortText,L"Windows %lu.%lu, ОЗУ занято: %.0f%%, процессоров: %lu",os.dwMajorVersion,os.dwMinorVersion,(double)mem.dwMemoryLoad,GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));return shortText;}
- return b;
+ if(!diagnosticsDetailed){wchar_t shortText[512]{};swprintf_s(shortText,L"Windows %lu.%lu, ОЗУ занято: %.0f%%, GPU: %s",os.dwMajorVersion,os.dwMinorVersion,(double)mem.dwMemoryLoad,GpuUsageText().c_str());return shortText;}
+ std::wstring out=b;out+=L"\nЗагрузка GPU: "+GpuUsageText();out+=L"\nFPS: доступно только для конкретного приложения/игры";out+=L"\nТемпературы CPU/GPU: нет универсального системного датчика; требуется поддержка драйвера";return out;
 }
 static void CopyToClipboard(HWND owner,const std::wstring& value){if(!OpenClipboard(owner))return;EmptyClipboard();SIZE_T bytes=(value.size()+1)*sizeof(wchar_t);HGLOBAL mem=GlobalAlloc(GMEM_MOVEABLE,bytes);if(mem){void*p=GlobalLock(mem);if(p){memcpy(p,value.c_str(),bytes);GlobalUnlock(mem);SetClipboardData(CF_UNICODETEXT,mem);}else GlobalFree(mem);}CloseClipboard();}
 static void ShowModulePanel(int idx){
  if(moduleWnd){DestroyWindow(moduleWnd);moduleWnd=nullptr;modeCombo=processList=nullptr;}
  const wchar_t* title=idx==0?L"J.A.R.V.I.S. — Системные режимы":idx==1?L"J.A.R.V.I.S. — Диспетчер процессов":idx==2?L"J.A.R.V.I.S. — Сетевой контроль":idx==3?L"J.A.R.V.I.S. — Диагностика Windows":idx==4?L"J.A.R.V.I.S. — Автоматические сценарии":L"J.A.R.V.I.S. — Журнал системы";
- int ww=idx==0?520:idx==1?720:idx==2?760:idx==3?650:idx==4?560:760,hh=idx==0?300:idx==1?550:idx==2?430:idx==3?430:idx==4?350:520;
+ int ww=idx==0?520:idx==1?720:idx==2?760:idx==3?650:idx==4?700:760,hh=idx==0?300:idx==1?550:idx==2?430:idx==3?430:idx==4?590:520;
  activePanelIndex=idx;moduleWnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_LAYERED,L"JarvisModulePanel",title,WS_POPUP|WS_CAPTION|WS_SYSMENU,0,0,ww,hh,mainWnd,nullptr,GetModuleHandleW(nullptr),nullptr);
  if(!moduleWnd)return;RECT w{};SystemParametersInfoW(SPI_GETWORKAREA,0,&w,0);int density=panelDensity[idx];double scale=density==0?0.90:density==2?1.10:1.0;ww=(int)(ww*scale);hh=(int)(hh*scale);SetWindowPos(moduleWnd,HWND_TOPMOST,w.right-ww-20,w.top+80,ww,hh,SWP_SHOWWINDOW);SetLayeredWindowAttributes(moduleWnd,0,(BYTE)(panelOpacity[idx]*255/100),LWA_ALPHA);if(moduleStyleFont)DeleteObject(moduleStyleFont);const int fhs[]={13,15,18};moduleStyleFont=CreateFontW(fhs[panelFont[idx]],0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  if(idx==0){
@@ -233,10 +265,18 @@ static void ShowModulePanel(int idx){
   CreateWindowW(L"BUTTON",L"Запустить сценарий",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,120,220,42,moduleWnd,(HMENU)522,GetModuleHandleW(nullptr),nullptr);
   CreateWindowW(L"STATIC",L"Игровой: высокая производительность + виджеты. Рабочий: сбалансированный режим. Энергосбережение: режим экономии + скрытие виджетов.",WS_CHILD|WS_VISIBLE,24,190,490,78,moduleWnd,nullptr,nullptr,nullptr);
   CreateWindowW(L"STATIC",L"Пользовательский сценарий:",WS_CHILD|WS_VISIBLE,24,282,210,26,moduleWnd,nullptr,nullptr,nullptr);
-  HWND customMode=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,24,310,260,130,moduleWnd,(HMENU)523,GetModuleHandleW(nullptr),nullptr);
-  const wchar_t* cm[]={L"Сбалансированный",L"Высокая производительность",L"Энергосбережение"};for(auto v:cm)SendMessageW(customMode,CB_ADDSTRING,0,(LPARAM)v);SendMessageW(customMode,CB_SETCURSEL,customScenarioMode,0);
-  HWND customHud=CreateWindowW(L"BUTTON",L"Оставить виджеты на экране",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,300,310,230,28,moduleWnd,(HMENU)524,GetModuleHandleW(nullptr),nullptr);SendMessageW(customHud,BM_SETCHECK,customScenarioHud?BST_CHECKED:BST_UNCHECKED,0);
-  CreateWindowW(L"BUTTON",L"Сохранить и запустить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,24,345,240,38,moduleWnd,(HMENU)525,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"STATIC",L"РЕДАКТОР ПОЛЬЗОВАТЕЛЬСКИХ СЦЕНАРИЕВ (до 12)",WS_CHILD|WS_VISIBLE,24,278,500,24,moduleWnd,nullptr,nullptr,nullptr);
+  CreateWindowW(L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|WS_VSCROLL|LBS_NOTIFY,24,306,250,190,moduleWnd,(HMENU)526,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"Мой сценарий",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,292,306,360,28,moduleWnd,(HMENU)527,GetModuleHandleW(nullptr),nullptr);
+  HWND customMode=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,292,348,360,130,moduleWnd,(HMENU)528,GetModuleHandleW(nullptr),nullptr);
+  const wchar_t* cm[]={L"Сбалансированный",L"Высокая производительность",L"Энергосбережение"};for(auto v:cm)SendMessageW(customMode,CB_ADDSTRING,0,(LPARAM)v);SendMessageW(customMode,CB_SETCURSEL,0,0);
+  HWND customHud=CreateWindowW(L"BUTTON",L"Показывать виджеты HUD",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,292,392,300,28,moduleWnd,(HMENU)529,GetModuleHandleW(nullptr),nullptr);SendMessageW(customHud,BM_SETCHECK,BST_CHECKED,0);
+  CreateWindowW(L"BUTTON",L"Добавить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,292,432,105,34,moduleWnd,(HMENU)530,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Сохранить изменения",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,407,432,170,34,moduleWnd,(HMENU)531,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Удалить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,292,475,105,34,moduleWnd,(HMENU)535,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"BUTTON",L"Запустить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,407,475,190,34,moduleWnd,(HMENU)536,GetModuleHandleW(nullptr),nullptr);
+  CreateWindowW(L"STATIC",L"Сценарии сохраняются в jarvis-scenarios.txt рядом с EXE.",WS_CHILD|WS_VISIBLE,24,520,620,24,moduleWnd,nullptr,nullptr,nullptr);
+  LoadUserScenarios();RefreshScenarioEditor();
  }else if(idx==5){
   CreateWindowW(L"STATIC",L"История действий J.A.R.V.I.S. — новые события добавляются автоматически:",WS_CHILD|WS_VISIBLE,18,16,710,26,moduleWnd,nullptr,nullptr,nullptr);
   logSearch=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,18,12,440,30,moduleWnd,(HMENU)554,GetModuleHandleW(nullptr),nullptr);
@@ -262,7 +302,11 @@ static LRESULT CALLBACK ModulePanelProc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case 512:RefreshProcessList();return 0;
  case 514:processSortMemory=!processSortMemory;RefreshProcessList();return 0;
  case 522:{int n=(int)SendMessageW(scenarioCombo,CB_GETCURSEL,0,0);if(n>=0&&n<3)RunScenario(n);return 0;}
- case 525:{customScenarioMode=(int)SendMessageW(GetDlgItem(h,523),CB_GETCURSEL,0,0);if(customScenarioMode<0)customScenarioMode=0;customScenarioHud=SendMessageW(GetDlgItem(h,524),BM_GETCHECK,0,0)==BST_CHECKED;Save();if(confirmScenarioRun&&MessageBoxW(h,L"Запустить пользовательский сценарий?",APP_NAME,MB_YESNO|MB_ICONQUESTION)!=IDYES)return 0;if(!ApplyPowerMode(customScenarioMode)){MessageBoxW(h,L"Не удалось применить выбранный план питания.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}preferredMode=customScenarioMode;bool show=customScenarioHud;if(hudVisible!=show)ToggleHud();LogEvent(L"Выполнен пользовательский сценарий");MessageBoxW(h,L"Пользовательский сценарий выполнен.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}
+ case 530:{if(userScenarios.size()>=12){MessageBoxW(h,L"Можно сохранить не более 12 сценариев.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}wchar_t name[128]{};GetDlgItemTextW(h,527,name,128);if(!name[0]){MessageBoxW(h,L"Введите название сценария.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}UserScenario v;v.name=name;v.powerMode=std::clamp((int)SendMessageW(GetDlgItem(h,528),CB_GETCURSEL,0,0),0,2);v.showHud=SendMessageW(GetDlgItem(h,529),BM_GETCHECK,0,0)==BST_CHECKED;userScenarios.push_back(v);SaveUserScenarios();RefreshScenarioEditor();LogEvent(L"Добавлен пользовательский сценарий: "+v.name);return 0;}
+ case 531:{int n=(int)SendMessageW(GetDlgItem(h,526),LB_GETCURSEL,0,0);if(n==LB_ERR||n>=(int)userScenarios.size())return 0;wchar_t name[128]{};GetDlgItemTextW(h,527,name,128);if(!name[0]){MessageBoxW(h,L"Введите название сценария.",APP_NAME,MB_OK|MB_ICONWARNING);return 0;}userScenarios[n].name=name;userScenarios[n].powerMode=std::clamp((int)SendMessageW(GetDlgItem(h,528),CB_GETCURSEL,0,0),0,2);userScenarios[n].showHud=SendMessageW(GetDlgItem(h,529),BM_GETCHECK,0,0)==BST_CHECKED;SaveUserScenarios();RefreshScenarioEditor();LogEvent(L"Изменён пользовательский сценарий: "+userScenarios[n].name);return 0;}
+ case 535:{int n=(int)SendMessageW(GetDlgItem(h,526),LB_GETCURSEL,0,0);if(n==LB_ERR||n>=(int)userScenarios.size())return 0;if(MessageBoxW(h,L"Удалить выбранный сценарий?",APP_NAME,MB_YESNO|MB_ICONQUESTION)!=IDYES)return 0;userScenarios.erase(userScenarios.begin()+n);SaveUserScenarios();RefreshScenarioEditor();return 0;}
+ case 536:{int n=(int)SendMessageW(GetDlgItem(h,526),LB_GETCURSEL,0,0);RunUserScenario(n);return 0;}
+ case 525:return 0;
  case 532:RefreshNetworkList();return 0;
  case 533:ShellExecuteW(h,L"open",L"ncpa.cpl",nullptr,nullptr,SW_SHOWNORMAL);return 0;
  case 534:{int sel=(int)SendMessageW(networkList,LB_GETCURSEL,0,0);if(sel==LB_ERR){MessageBoxW(h,L"Сначала выберите сетевой адаптер.",APP_NAME,MB_OK|MB_ICONINFORMATION);return 0;}DWORD index=(DWORD)SendMessageW(networkList,LB_GETITEMDATA,sel,0);DWORD size=0;GetIfTable(nullptr,&size,FALSE);std::vector<BYTE> buf(size);auto*t=(MIB_IFTABLE*)buf.data();std::wstring out=L"Сведения о сетевом адаптере\r\nИндекс: "+std::to_wstring(index);if(size&&GetIfTable(t,&size,FALSE)==NO_ERROR)for(DWORD i=0;i<t->dwNumEntries;i++)if(t->table[i].dwIndex==index){const auto&r=t->table[i];out+=L"\r\nСостояние: ";out+=r.dwOperStatus==MIB_IF_OPER_STATUS_OPERATIONAL?L"Подключён":L"Не подключён";out+=L"\r\nПолучено: "+std::to_wstring(r.dwInOctets/1048576)+L" МБ\r\nОтправлено: "+std::to_wstring(r.dwOutOctets/1048576)+L" МБ";break;}CopyToClipboard(h,out);if(networkDetails)SetWindowTextW(networkDetails,L"Сведения об адаптере скопированы в буфер обмена.");return 0;}
@@ -320,4 +364,4 @@ static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM wp,LPARAM lp){
  case WM_DESTROY:UnregisterHotKey(h,1);UnregisterHotKey(h,2);KillTimer(h,1);SaveHudPositions();for(auto&w:hud)if(w.hwnd)DestroyWindow(w.hwnd);PostQuitMessage(0);return 0;
  }return DefWindowProcW(h,m,wp,lp);
 }
-int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){iniPath=IniPath();logPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis.log";scenarioPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis-scenarios.txt";Load();INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);WNDCLASSEXW panelClass{sizeof(panelClass)};panelClass.lpfnWndProc=ModulePanelProc;panelClass.hInstance=inst;panelClass.lpszClassName=L"JarvisModulePanel";panelClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassExW(&panelClass);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=Proc;wc.hInstance=inst;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=CreateSolidBrush(bg);wc.lpszClassName=L"JarvisDesktopWindow";wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION);if(!RegisterClassExW(&wc))return 1;mainWnd=CreateWindowExW(0,wc.lpszClassName,APP_NAME,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1120,900,nullptr,nullptr,inst,nullptr);if(!mainWnd)return 2;ShowWindow(mainWnd,show);UpdateWindow(mainWnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return (int)msg.wParam;}
+int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){iniPath=IniPath();logPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis.log";scenarioPath=iniPath.substr(0,iniPath.find_last_of(L"\\/"))+L"jarvis-scenarios.txt";Load();LoadUserScenarios();INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);WNDCLASSEXW panelClass{sizeof(panelClass)};panelClass.lpfnWndProc=ModulePanelProc;panelClass.hInstance=inst;panelClass.lpszClassName=L"JarvisModulePanel";panelClass.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassExW(&panelClass);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=Proc;wc.hInstance=inst;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=CreateSolidBrush(bg);wc.lpszClassName=L"JarvisDesktopWindow";wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION);if(!RegisterClassExW(&wc))return 1;mainWnd=CreateWindowExW(0,wc.lpszClassName,APP_NAME,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1120,900,nullptr,nullptr,inst,nullptr);if(!mainWnd)return 2;ShowWindow(mainWnd,show);UpdateWindow(mainWnd);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return (int)msg.wParam;}
