@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
 #include <mmsystem.h>
@@ -378,15 +379,15 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         LoadMacros();
         CreateWindowW(L"STATIC",L"Голосовые макросы: команда срабатывает после точного совпадения фразы.",WS_CHILD|WS_VISIBLE,18,14,590,28,h,nullptr,nullptr,nullptr);
         CreateWindowW(L"STATIC",L"Команда",WS_CHILD|WS_VISIBLE,18,52,120,22,h,nullptr,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"открой YouTube",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,18,76,270,28,h,(HMENU)ID_VOICE_PHRASE,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"открой YouTube",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,18,76,270,28,h,(HMENU)(INT_PTR)ID_VOICE_PHRASE,nullptr,nullptr);
         CreateWindowW(L"STATIC",L"Сайт или путь к приложению/папке",WS_CHILD|WS_VISIBLE,306,52,300,22,h,nullptr,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"https://www.youtube.com",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,306,76,300,28,h,(HMENU)ID_VOICE_TARGET,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,116,150,34,h,(HMENU)ID_VOICE_ADD,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,180,116,160,34,h,(HMENU)ID_VOICE_DELETE,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,360,116,145,34,h,(HMENU)ID_VOICE_START,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,515,116,100,34,h,(HMENU)ID_VOICE_STOP,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,164,598,260,h,(HMENU)ID_VOICE_LIST,nullptr,nullptr);
-        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,434,598,42,h,(HMENU)708,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"https://www.youtube.com",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,306,76,300,28,h,(HMENU)(INT_PTR)ID_VOICE_TARGET,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,116,150,34,h,(HMENU)(INT_PTR)ID_VOICE_ADD,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,180,116,160,34,h,(HMENU)(INT_PTR)ID_VOICE_DELETE,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,360,116,145,34,h,(HMENU)(INT_PTR)ID_VOICE_START,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,515,116,100,34,h,(HMENU)(INT_PTR)ID_VOICE_STOP,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,164,598,260,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
+        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,434,598,42,h,(HMENU)(INT_PTR)708,nullptr,nullptr);
         RefreshList();
         return 0;
     }
