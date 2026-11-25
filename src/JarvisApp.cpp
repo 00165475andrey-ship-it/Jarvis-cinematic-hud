@@ -175,10 +175,10 @@ static std::wstring GpuUsageText(){
  if(!gpuQuery){if(PdhOpenQueryW(nullptr,0,&gpuQuery)!=ERROR_SUCCESS)return L"недоступно";if(PdhAddEnglishCounterW(gpuQuery,L"\\GPU Engine(*)\\Utilization Percentage",0,&gpuCounter)!=ERROR_SUCCESS){PdhCloseQuery(gpuQuery);gpuQuery=nullptr;gpuCounter=nullptr;return L"нет счётчика GPU (Windows/драйвер)";}}
  if(PdhCollectQueryData(gpuQuery)!=ERROR_SUCCESS)return L"недоступно";
  DWORD bytes=0,count=0;PDH_STATUS st=PdhGetFormattedCounterArrayW(gpuCounter,PDH_FMT_DOUBLE,&bytes,&count,nullptr);
- if(st!=PDH_MORE_DATA||bytes==0)return L"сбор данных...";
+ if(st!=static_cast<PDH_STATUS>(0x800007D2L)||bytes==0)return L"сбор данных...";
  std::vector<BYTE> buffer(bytes);auto*items=(PDH_FMT_COUNTERVALUE_ITEM_W*)buffer.data();
  if(PdhGetFormattedCounterArrayW(gpuCounter,PDH_FMT_DOUBLE,&bytes,&count,items)!=ERROR_SUCCESS)return L"недоступно";
- double total=0;for(DWORD i=0;i<count;i++)if(items[i].FmtValue.CStatus==PDH_CSTATUS_VALID_DATA||items[i].FmtValue.CStatus==PDH_CSTATUS_NEW_DATA)total+=items[i].FmtValue.doubleValue;
+ double total=0;for(DWORD i=0;i<count;i++)if(items[i].FmtValue.CStatus==0||items[i].FmtValue.CStatus==1)total+=items[i].FmtValue.doubleValue;
  wchar_t out[64];swprintf_s(out,L"%.0f%%",std::clamp(total,0.0,100.0));return out;
 }
 static void RefreshProcessList(){
