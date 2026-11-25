@@ -76,11 +76,10 @@ void LoadVoiceSettings() {
     g_pttKey=key;
 }
 void SaveVoiceSettings() {
-    wchar_t value[16]{};
-    _itow_s(g_listenMode.load(),value,10);
-    WritePrivateProfileStringW(L"Voice",L"Mode",value,g_settingsFile.c_str());
-    _itow_s(g_pttKey.load(),value,10);
-    WritePrivateProfileStringW(L"Voice",L"PushToTalkKey",value,g_settingsFile.c_str());
+    const std::wstring mode=std::to_wstring(g_listenMode.load());
+    const std::wstring key=std::to_wstring(g_pttKey.load());
+    WritePrivateProfileStringW(L"Voice",L"Mode",mode.c_str(),g_settingsFile.c_str());
+    WritePrivateProfileStringW(L"Voice",L"PushToTalkKey",key.c_str(),g_settingsFile.c_str());
 }
 void SetStatus(const std::wstring& s) {
     { std::lock_guard<std::mutex> lock(g_statusMutex); g_status=s; }
