@@ -24,7 +24,7 @@ constexpr UINT WM_VOICE_KEYSTATE = WM_APP + 72;
 constexpr int ID_VOICE_START=701, ID_VOICE_STOP=702, ID_VOICE_PHRASE=703,
               ID_VOICE_TARGET=704, ID_VOICE_ADD=705, ID_VOICE_LIST=706,
               ID_VOICE_DELETE=707, ID_VOICE_MODE=708, ID_VOICE_HOTKEY=709,
-              ID_VOICE_STATUS_LABEL=710, ID_VOICE_SENSITIVITY=711, ID_VOICE_CONFIDENCE=712;
+              ID_VOICE_STATUS_LABEL=710, ID_VOICE_SENSITIVITY=711, ID_VOICE_CONFIDENCE=712, ID_VOICE_DEVICE=713;
 
 using ModelNew = void* (__cdecl*)(const char*);
 using ModelFree = void (__cdecl*)(void*);
@@ -56,6 +56,7 @@ std::atomic<int> g_listenMode{0}; // 0 = continuous, 1 = push-to-talk
 std::atomic<int> g_pttKey{VK_F7};
 std::atomic<int> g_sensitivity{65};
 std::atomic<int> g_confidence{35};
+std::atomic<int> g_deviceId{-1};
 std::atomic<bool> g_pttHeld{false};
 std::vector<Macro> g_macros;
 std::mutex g_macroMutex, g_statusMutex;
@@ -82,6 +83,7 @@ void LoadVoiceSettings() {
     g_pttKey=key;
     g_sensitivity=std::clamp(GetPrivateProfileIntW(L"Voice",L"Sensitivity",65,g_settingsFile.c_str()),0,100);
     g_confidence=std::clamp(GetPrivateProfileIntW(L"Voice",L"Confidence",35,g_settingsFile.c_str()),0,100);
+    g_deviceId=GetPrivateProfileIntW(L"Voice",L"DeviceId",-1,g_settingsFile.c_str());
 }
 void SaveVoiceSettings() {
     const std::wstring mode=std::to_wstring(g_listenMode.load());
@@ -92,6 +94,8 @@ void SaveVoiceSettings() {
     const std::wstring confidence=std::to_wstring(g_confidence.load());
     WritePrivateProfileStringW(L"Voice",L"Sensitivity",sensitivity.c_str(),g_settingsFile.c_str());
     WritePrivateProfileStringW(L"Voice",L"Confidence",confidence.c_str(),g_settingsFile.c_str());
+    const std::wstring device=std::to_wstring(g_deviceId.load());
+    WritePrivateProfileStringW(L"Voice",L"DeviceId",device.c_str(),g_settingsFile.c_str());
 }
 void SetStatus(const std::wstring& s) {
     { std::lock_guard<std::mutex> lock(g_statusMutex); g_status=s; }
@@ -363,7 +367,9 @@ void Worker() {
     fmt.wBitsPerSample=16;
     fmt.nBlockAlign=2;
     fmt.nAvgBytesPerSec=32000;
-    MMRESULT mr=waveInOpen(&input,WAVE_MAPPER,&fmt,(DWORD_PTR)event,0,CALLBACK_EVENT);
+    const int selectedDevice=g_deviceId.load();
+    const UINT deviceId=(selectedDevice>=0 && selectedDevice<(int)waveInGetNumDevs())?(UINT)selectedDevice:WAVE_MAPPER;
+    MMRESULT mr=waveInOpen(&input,deviceId,&fmt,(DWORD_PTR)event,0,CALLBACK_EVENT);
     if(mr!=MMSYSERR_NOERROR) {
         SetStatus(L"Микрофон недоступен. Проверьте устройство и разрешения Windows.");
         cleanup(); g_running=false; return;
@@ -386,6 +392,8 @@ void Worker() {
         SetStatus(L"Не удалось включить микрофон");
         cleanup(); g_running=false; return;
     }
+    double noiseFloorRms=100.0;
+    double previousInput=0.0, previousOutput=0.0;
     bool wasListening=(g_listenMode.load()==0);
     SetStatus(wasListening?L"Микрофон активен — ожидание голосовой команды":L"Режим Push-to-Talk: удерживайте назначенную клавишу");
 
@@ -409,15 +417,27 @@ void Worker() {
             WAVEHDR& h=headers[i];
             if(!(h.dwFlags&WHDR_DONE)) continue;
             if(h.dwBytesRecorded>0 && ((g_listenMode.load()==0) || g_pttHeld.load())) {
-                // Configurable noise gate for signed 16-bit mono PCM.
-                const int gate=(100-g_sensitivity.load())*8;
+                // DC blocker + adaptive soft noise gate for signed 16-bit mono PCM.
                 short* samples=reinterpret_cast<short*>(h.lpData);
                 const size_t count=h.dwBytesRecorded/sizeof(short);
                 long long squares=0;
                 for(size_t k=0;k<count;++k) squares+=(long long)samples[k]*samples[k];
                 const double rms=count?std::sqrt((double)squares/count):0.0;
-                const int threshold=std::max(gate,(int)(rms*0.035));
-                for(size_t k=0;k<count;++k) if(std::abs((int)samples[k])<threshold) samples[k]=0;
+                if(rms < noiseFloorRms*2.5) noiseFloorRms=noiseFloorRms*0.96+rms*0.04;
+                const double sensitivity=g_sensitivity.load()/100.0;
+                const double threshold=std::max(35.0,noiseFloorRms*(4.8-3.4*sensitivity));
+                for(size_t k=0;k<count;++k) {
+                    const double raw=samples[k];
+                    double filtered=raw-previousInput+0.995*previousOutput;
+                    previousInput=raw; previousOutput=filtered;
+                    const double magnitude=std::abs(filtered);
+                    if(magnitude<threshold) {
+                        const double floorGain=0.08+0.42*sensitivity;
+                        filtered*=floorGain+(1.0-floorGain)*(magnitude/threshold);
+                    }
+                    filtered=std::max(-32768.0,std::min(32767.0,filtered));
+                    samples[k]=(short)filtered;
+                }
                 int accepted=api.accept(rec,h.lpData,(int)h.dwBytesRecorded);
                 if(accepted<0) {
                     SetStatus(L"Vosk сообщил об ошибке обработки аудио");
@@ -483,17 +503,35 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         int selected=1;
         for(int i=0;i<10;i++){int n=(int)SendMessageW(hotkey,CB_ADDSTRING,0,(LPARAM)names[i]);SendMessageW(hotkey,CB_SETITEMDATA,n,keys[i]);if(keys[i]==g_pttKey.load())selected=i;}
         SendMessageW(hotkey,CB_SETCURSEL,selected,0);
-        CreateWindowW(L"STATIC",L"Чувствительность (0–100)",WS_CHILD|WS_VISIBLE,18,224,210,20,h,nullptr,nullptr,nullptr);
+        CreateWindowW(L"STATIC",L"Микрофон",WS_CHILD|WS_VISIBLE,18,224,90,20,h,nullptr,nullptr,nullptr);
+        HWND devices=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,110,220,500,180,h,(HMENU)(INT_PTR)ID_VOICE_DEVICE,nullptr,nullptr);
+        WAVEINCAPSW caps{};
+        int chosenDevice=-1;
+        const UINT deviceCount=waveInGetNumDevs();
+        for(UINT device=0;device<deviceCount;++device) {
+            if(waveInGetDevCapsW(device,&caps,sizeof(caps))==MMSYSERR_NOERROR) {
+                int item=(int)SendMessageW(devices,CB_ADDSTRING,0,(LPARAM)caps.szPname);
+                SendMessageW(devices,CB_SETITEMDATA,item,device);
+                if((int)device==g_deviceId.load()) chosenDevice=item;
+            }
+        }
+        if(chosenDevice<0) {
+            int item=(int)SendMessageW(devices,CB_INSERTSTRING,0,(LPARAM)L"Системный микрофон по умолчанию");
+            SendMessageW(devices,CB_SETITEMDATA,item,(LPARAM)-1);
+            chosenDevice=item;
+        }
+        SendMessageW(devices,CB_SETCURSEL,chosenDevice,0);
+        CreateWindowW(L"STATIC",L"Чувствительность (0–100)",WS_CHILD|WS_VISIBLE,18,254,210,20,h,nullptr,nullptr,nullptr);
         wchar_t sens[16]{}; wsprintfW(sens,L"%d",g_sensitivity.load());
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",sens,WS_CHILD|WS_VISIBLE|ES_NUMBER,230,220,45,25,h,(HMENU)(INT_PTR)ID_VOICE_SENSITIVITY,nullptr,nullptr);
-        CreateWindowW(L"STATIC",L"Мин. уверенность (0–100%)",WS_CHILD|WS_VISIBLE,340,224,220,20,h,nullptr,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",sens,WS_CHILD|WS_VISIBLE|ES_NUMBER,230,250,45,25,h,(HMENU)(INT_PTR)ID_VOICE_SENSITIVITY,nullptr,nullptr);
+        CreateWindowW(L"STATIC",L"Мин. уверенность (0–100%)",WS_CHILD|WS_VISIBLE,340,254,220,20,h,nullptr,nullptr,nullptr);
         wchar_t conf[16]{}; wsprintfW(conf,L"%d",g_confidence.load());
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",conf,WS_CHILD|WS_VISIBLE|ES_NUMBER,565,220,45,25,h,(HMENU)(INT_PTR)ID_VOICE_CONFIDENCE,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",conf,WS_CHILD|WS_VISIBLE|ES_NUMBER,565,250,45,25,h,(HMENU)(INT_PTR)ID_VOICE_CONFIDENCE,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_ADD,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,172,184,160,34,h,(HMENU)(INT_PTR)ID_VOICE_DELETE,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,344,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_START,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,500,184,100,34,h,(HMENU)(INT_PTR)ID_VOICE_STOP,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,260,598,245,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,290,598,215,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
         CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,515,598,48,h,(HMENU)(INT_PTR)ID_VOICE_STATUS_LABEL,nullptr,nullptr);
         g_keyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,KeyboardHookProc,GetModuleHandleW(nullptr),0);
         RefreshList();
@@ -505,6 +543,7 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         case ID_VOICE_STOP: Stop(); return 0;
         case ID_VOICE_MODE: if(HIWORD(wp)==CBN_SELCHANGE){int n=(int)SendDlgItemMessageW(h,ID_VOICE_MODE,CB_GETCURSEL,0,0);g_listenMode=n==1?1:0;g_pttHeld=false;SaveVoiceSettings();SetStatus(g_listenMode.load()?L"Push-to-Talk: удерживайте выбранную клавишу":L"Постоянное прослушивание");return 0;}
         case ID_VOICE_HOTKEY: if(HIWORD(wp)==CBN_SELCHANGE){HWND cb=GetDlgItem(h,ID_VOICE_HOTKEY);int n=(int)SendMessageW(cb,CB_GETCURSEL,0,0);if(n!=CB_ERR){g_pttKey=(int)SendMessageW(cb,CB_GETITEMDATA,n,0);SaveVoiceSettings();}return 0;}
+        case ID_VOICE_DEVICE: if(HIWORD(wp)==CBN_SELCHANGE){HWND cb=GetDlgItem(h,ID_VOICE_DEVICE);int n=(int)SendMessageW(cb,CB_GETCURSEL,0,0);if(n!=CB_ERR){g_deviceId=(int)SendMessageW(cb,CB_GETITEMDATA,n,0);SaveVoiceSettings();if(g_running.load())SetStatus(L"Микрофон изменён. Перезапустите распознавание для применения.");}return 0;}
         case ID_VOICE_SENSITIVITY:
         case ID_VOICE_CONFIDENCE: {
             wchar_t value[16]{}; GetWindowTextW(GetDlgItem(h,LOWORD(wp)),value,16);
