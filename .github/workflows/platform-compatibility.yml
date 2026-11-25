@@ -50,3 +50,4 @@ jobs:
             throw "Expected Windows x86 compatibility message was not shown."
           }
           Write-Host "PASS: Windows x86 is rejected with a clear explanation."
+          exit 0
