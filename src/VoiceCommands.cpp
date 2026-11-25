@@ -18,9 +18,11 @@
 
 namespace {
 constexpr UINT WM_VOICE_STATUS = WM_APP + 71;
+constexpr UINT WM_VOICE_KEYSTATE = WM_APP + 72;
 constexpr int ID_VOICE_START=701, ID_VOICE_STOP=702, ID_VOICE_PHRASE=703,
               ID_VOICE_TARGET=704, ID_VOICE_ADD=705, ID_VOICE_LIST=706,
-              ID_VOICE_DELETE=707;
+              ID_VOICE_DELETE=707, ID_VOICE_MODE=708, ID_VOICE_HOTKEY=709,
+              ID_VOICE_STATUS_LABEL=710;
 
 using ModelNew = void* (__cdecl*)(const char*);
 using ModelFree = void (__cdecl*)(void*);
@@ -28,6 +30,7 @@ using RecNew = void* (__cdecl*)(void*, float);
 using RecFree = void (__cdecl*)(void*);
 using Accept = int (__cdecl*)(void*, const char*, int);
 using Result = const char* (__cdecl*)(void*);
+using RecReset = void (__cdecl*)(void*);
 struct Api {
     HMODULE dll{};
     ModelNew modelNew{};
@@ -38,17 +41,47 @@ struct Api {
     Result result{};
     Result partial{};
     Result finalResult{};
+    RecReset reset{};
 };
 struct Macro { std::wstring phrase, target; };
 
 HWND g_window{};
-std::wstring g_base, g_macroFile;
+HHOOK g_keyboardHook{};
+std::wstring g_base, g_macroFile, g_settingsFile;
+std::atomic<int> g_listenMode{0}; // 0 = continuous, 1 = push-to-talk
+std::atomic<int> g_pttKey{VK_F7};
+std::atomic<bool> g_pttHeld{false};
 std::vector<Macro> g_macros;
 std::mutex g_macroMutex, g_statusMutex;
 std::thread g_worker;
 std::atomic<bool> g_running{false}, g_stop{false};
 std::wstring g_status=L"Распознавание выключено";
 
+LRESULT CALLBACK KeyboardHookProc(int code, WPARAM wp, LPARAM lp) {
+    if(code==HC_ACTION) {
+        const auto* key=reinterpret_cast<KBDLLHOOKSTRUCT*>(lp);
+        const int configured=g_pttKey.load();
+        if(key && (int)key->vkCode==configured && g_listenMode.load()==1) {
+            if(wp==WM_KEYDOWN || wp==WM_SYSKEYDOWN) g_pttHeld=true;
+            else if(wp==WM_KEYUP || wp==WM_SYSKEYUP) g_pttHeld=false;
+            if(g_window) PostMessageW(g_window,WM_VOICE_KEYSTATE,0,0);
+        }
+    }
+    return CallNextHookEx(g_keyboardHook,code,wp,lp);
+}
+void LoadVoiceSettings() {
+    g_listenMode=GetPrivateProfileIntW(L"Voice",L"Mode",0,g_settingsFile.c_str())?1:0;
+    int key=GetPrivateProfileIntW(L"Voice",L"PushToTalkKey",VK_F7,g_settingsFile.c_str());
+    if(key<=0 || key>255) key=VK_F7;
+    g_pttKey=key;
+}
+void SaveVoiceSettings() {
+    wchar_t value[16]{};
+    _itow_s(g_listenMode.load(),value,10);
+    WritePrivateProfileStringW(L"Voice",L"Mode",value,g_settingsFile.c_str());
+    _itow_s(g_pttKey.load(),value,10);
+    WritePrivateProfileStringW(L"Voice",L"PushToTalkKey",value,g_settingsFile.c_str());
+}
 void SetStatus(const std::wstring& s) {
     { std::lock_guard<std::mutex> lock(g_statusMutex); g_status=s; }
     HWND w=g_window;
@@ -244,7 +277,8 @@ bool LoadApi(Api& a) {
     a.result=(Result)GetProcAddress(a.dll,"vosk_recognizer_result");
     a.partial=(Result)GetProcAddress(a.dll,"vosk_recognizer_partial_result");
     a.finalResult=(Result)GetProcAddress(a.dll,"vosk_recognizer_final_result");
-    return a.modelNew&&a.modelFree&&a.recNew&&a.recFree&&a.accept&&a.result&&a.partial&&a.finalResult;
+    a.reset=(RecReset)GetProcAddress(a.dll,"vosk_recognizer_reset");
+    return a.modelNew&&a.modelFree&&a.recNew&&a.recFree&&a.accept&&a.result&&a.partial&&a.finalResult&&a.reset;
 }
 void Worker() {
     Api api{};
@@ -317,10 +351,20 @@ void Worker() {
         SetStatus(L"Не удалось включить микрофон");
         cleanup(); g_running=false; return;
     }
-    SetStatus(L"Микрофон активен — ожидание голосовой команды");
+    bool wasListening=(g_listenMode.load()==0);
+    SetStatus(wasListening?L"Микрофон активен — ожидание голосовой команды":L"Режим Push-to-Talk: удерживайте назначенную клавишу");
 
     while(!g_stop.load()) {
-        DWORD wait=WaitForSingleObject(event,250);
+        const bool listening=(g_listenMode.load()==0) || g_pttHeld.load();
+        if(wasListening && !listening) {
+            ProcessResultJson(api.finalResult(rec));
+            api.reset(rec);
+            SetStatus(L"Ожидание клавиши Push-to-Talk");
+        } else if(!wasListening && listening) {
+            SetStatus(L"Push-to-Talk активен — говорите");
+        }
+        wasListening=listening;
+        DWORD wait=WaitForSingleObject(event,150);
         if(wait==WAIT_TIMEOUT) continue;
         if(wait!=WAIT_OBJECT_0) {
             SetStatus(L"Ошибка ожидания аудиоданных микрофона");
@@ -329,7 +373,7 @@ void Worker() {
         for(size_t i=0;i<headers.size();++i) {
             WAVEHDR& h=headers[i];
             if(!(h.dwFlags&WHDR_DONE)) continue;
-            if(h.dwBytesRecorded>0) {
+            if(h.dwBytesRecorded>0 && ((g_listenMode.load()==0) || g_pttHeld.load())) {
                 int accepted=api.accept(rec,h.lpData,(int)h.dwBytesRecorded);
                 if(accepted<0) {
                     SetStatus(L"Vosk сообщил об ошибке обработки аудио");
@@ -377,17 +421,31 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_CREATE) {
         g_window=h;
         LoadMacros();
-        CreateWindowW(L"STATIC",L"Голосовые макросы: команда срабатывает после точного совпадения фразы.",WS_CHILD|WS_VISIBLE,18,14,590,28,h,nullptr,nullptr,nullptr);
+        LoadVoiceSettings();
+        CreateWindowW(L"STATIC",L"Голосовые макросы: команда запускается только после точного совпадения фразы.",WS_CHILD|WS_VISIBLE,18,14,610,28,h,nullptr,nullptr,nullptr);
         CreateWindowW(L"STATIC",L"Команда",WS_CHILD|WS_VISIBLE,18,52,120,22,h,nullptr,nullptr,nullptr);
         CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"открой YouTube",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,18,76,270,28,h,(HMENU)(INT_PTR)ID_VOICE_PHRASE,nullptr,nullptr);
         CreateWindowW(L"STATIC",L"Сайт или путь к приложению/папке",WS_CHILD|WS_VISIBLE,306,52,300,22,h,nullptr,nullptr,nullptr);
         CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"https://www.youtube.com",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,306,76,300,28,h,(HMENU)(INT_PTR)ID_VOICE_TARGET,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,116,150,34,h,(HMENU)(INT_PTR)ID_VOICE_ADD,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,180,116,160,34,h,(HMENU)(INT_PTR)ID_VOICE_DELETE,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,360,116,145,34,h,(HMENU)(INT_PTR)ID_VOICE_START,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,515,116,100,34,h,(HMENU)(INT_PTR)ID_VOICE_STOP,nullptr,nullptr);
-        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,164,598,260,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
-        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,434,598,42,h,(HMENU)(INT_PTR)708,nullptr,nullptr);
+        CreateWindowW(L"STATIC",L"Режим прослушивания",WS_CHILD|WS_VISIBLE,18,116,180,22,h,nullptr,nullptr,nullptr);
+        HWND mode=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,18,140,250,150,h,(HMENU)(INT_PTR)ID_VOICE_MODE,nullptr,nullptr);
+        SendMessageW(mode,CB_ADDSTRING,0,(LPARAM)L"Постоянное прослушивание");
+        SendMessageW(mode,CB_ADDSTRING,0,(LPARAM)L"Push-to-Talk — удерживать клавишу");
+        SendMessageW(mode,CB_SETCURSEL,g_listenMode.load(),0);
+        CreateWindowW(L"STATIC",L"Клавиша Push-to-Talk",WS_CHILD|WS_VISIBLE,290,116,190,22,h,nullptr,nullptr,nullptr);
+        HWND hotkey=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,290,140,180,220,h,(HMENU)(INT_PTR)ID_VOICE_HOTKEY,nullptr,nullptr);
+        const int keys[]={VK_F6,VK_F7,VK_F8,VK_F9,VK_F10,VK_F11,VK_F12,VK_SPACE,VK_CAPITAL,VK_RCONTROL};
+        const wchar_t* names[]={L"F6",L"F7",L"F8",L"F9",L"F10",L"F11",L"F12",L"Пробел",L"Caps Lock",L"Правый Ctrl"};
+        int selected=1;
+        for(int i=0;i<10;i++){int n=(int)SendMessageW(hotkey,CB_ADDSTRING,0,(LPARAM)names[i]);SendMessageW(hotkey,CB_SETITEMDATA,n,keys[i]);if(keys[i]==g_pttKey.load())selected=i;}
+        SendMessageW(hotkey,CB_SETCURSEL,selected,0);
+        CreateWindowW(L"BUTTON",L"Добавить макрос",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,18,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_ADD,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Удалить выбранный",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,172,184,160,34,h,(HMENU)(INT_PTR)ID_VOICE_DELETE,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Включить микрофон",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,344,184,145,34,h,(HMENU)(INT_PTR)ID_VOICE_START,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"Выключить",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,500,184,100,34,h,(HMENU)(INT_PTR)ID_VOICE_STOP,nullptr,nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,18,232,598,245,h,(HMENU)(INT_PTR)ID_VOICE_LIST,nullptr,nullptr);
+        CreateWindowW(L"STATIC",GetStatus().c_str(),WS_CHILD|WS_VISIBLE,18,490,598,48,h,(HMENU)(INT_PTR)ID_VOICE_STATUS_LABEL,nullptr,nullptr);
+        g_keyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,KeyboardHookProc,GetModuleHandleW(nullptr),0);
         RefreshList();
         return 0;
     }
@@ -395,6 +453,8 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         switch(LOWORD(wp)) {
         case ID_VOICE_START: Start(); return 0;
         case ID_VOICE_STOP: Stop(); return 0;
+        case ID_VOICE_MODE: if(HIWORD(wp)==CBN_SELCHANGE){int n=(int)SendDlgItemMessageW(h,ID_VOICE_MODE,CB_GETCURSEL,0,0);g_listenMode=n==1?1:0;g_pttHeld=false;SaveVoiceSettings();SetStatus(g_listenMode.load()?L"Push-to-Talk: удерживайте выбранную клавишу":L"Постоянное прослушивание");return 0;}
+        case ID_VOICE_HOTKEY: if(HIWORD(wp)==CBN_SELCHANGE){HWND cb=GetDlgItem(h,ID_VOICE_HOTKEY);int n=(int)SendMessageW(cb,CB_GETCURSEL,0,0);if(n!=CB_ERR){g_pttKey=(int)SendMessageW(cb,CB_GETITEMDATA,n,0);SaveVoiceSettings();}return 0;}
         case ID_VOICE_ADD: {
             wchar_t phrase[256]{},target[512]{};
             GetDlgItemTextW(h,ID_VOICE_PHRASE,phrase,256);
@@ -442,8 +502,12 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
         }
         }
     }
+    if(msg==WM_VOICE_KEYSTATE) {
+        if(g_listenMode.load()==1) SetStatus(g_pttHeld.load()?L"Push-to-Talk активен — говорите":L"Ожидание клавиши Push-to-Talk");
+        return 0;
+    }
     if(msg==WM_VOICE_STATUS) {
-        HWND st=GetDlgItem(h,708);
+        HWND st=GetDlgItem(h,ID_VOICE_STATUS_LABEL);
         if(st) { const std::wstring status=GetStatus(); SetWindowTextW(st,status.c_str()); }
         return 0;
     }
@@ -456,6 +520,8 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
     if(msg==WM_DESTROY) {
         Stop();
         if(g_worker.joinable()) g_worker.join();
+        if(g_keyboardHook){UnhookWindowsHookEx(g_keyboardHook);g_keyboardHook=nullptr;}
+        g_pttHeld=false;
         g_window=nullptr;
         return 0;
     }
@@ -467,6 +533,7 @@ void OpenVoiceCommands(HWND owner,const std::wstring& basePath) {
     g_base=basePath;
     if(!g_base.empty() && g_base.back()==L'\\') g_base.pop_back();
     g_macroFile=g_base+L"\\jarvis-voice-commands.txt";
+    g_settingsFile=g_base+L"\\jarvis-voice-settings.ini";
     if(g_window && IsWindow(g_window)) {
         ShowWindow(g_window,SW_SHOWNORMAL);
         SetForegroundWindow(g_window);
