@@ -112,6 +112,44 @@ std::wstring TrimLower(std::wstring s) {
     std::transform(s.begin(),s.end(),s.begin(),[](wchar_t c){return (wchar_t)towlower(c);});
     return s;
 }
+
+// Conservative Russian command normalization: exact matching is retained after
+// normalizing common verb forms, polite filler words, punctuation and spacing.
+std::wstring NormalizeCommand(const std::wstring& input) {
+    std::wstring s=TrimLower(input);
+    std::wstring cleaned;
+    cleaned.reserve(s.size());
+    for(wchar_t ch:s) {
+        if(ch==L'ё') ch=L'е';
+        if(iswalnum(ch) || iswspace(ch)) cleaned.push_back(ch);
+        else cleaned.push_back(L' ');
+    }
+    std::vector<std::wstring> words;
+    size_t p=0;
+    while(p<cleaned.size()) {
+        while(p<cleaned.size() && iswspace(cleaned[p])) ++p;
+        size_t e=p;
+        while(e<cleaned.size() && !iswspace(cleaned[e])) ++e;
+        if(e>p) {
+            std::wstring w=cleaned.substr(p,e-p);
+            if(w==L"пожалуйста" || w==L"мне" || w==L"ну" || w==L"сейчас" || w==L"какую-нибудь") {
+                p=e; continue;
+            }
+            if(w==L"открой" || w==L"открыть" || w==L"откройте" ||
+               w==L"запусти" || w==L"запустить" || w==L"запустите" ||
+               w==L"покажи" || w==L"показать" || w==L"покажите") w=L"открыть";
+            else if(w==L"включи" || w==L"включить" || w==L"включите" ||
+                    w==L"активируй" || w==L"активировать") w=L"включить";
+            else if(w==L"выключи" || w==L"выключить" || w==L"выключите" ||
+                    w==L"отключи" || w==L"отключить" || w==L"деактивируй") w=L"выключить";
+            words.push_back(w);
+        }
+        p=e;
+    }
+    std::wstring result;
+    for(const auto& w:words) { if(!result.empty()) result.push_back(L' '); result+=w; }
+    return result;
+}
 std::wstring Utf8ToWide(const std::string& s) {
     if(s.empty()) return L"";
     int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.c_str(),(int)s.size(),nullptr,0);
@@ -179,18 +217,18 @@ bool SaveMacros() {
     return WriteAll(g_macroFile,WideToUtf8(all));
 }
 void ExecuteExact(const std::wstring& recognized) {
-    const std::wstring key=TrimLower(recognized);
+    const std::wstring key=NormalizeCommand(recognized);
     if(key.empty()) return;
     Macro found;
     bool matched=false;
     {
         std::lock_guard<std::mutex> lock(g_macroMutex);
         for(const auto&m:g_macros) {
-            if(TrimLower(m.phrase)==key) { found=m; matched=true; break; }
+            if(NormalizeCommand(m.phrase)==key) { found=m; matched=true; break; }
         }
     }
     if(!matched) {
-        SetStatus(L"Распознано: "+recognized+L" — макрос не найден");
+        SetStatus(L"Распознано: "+recognized+L" — подходящий макрос не найден");
         return;
     }
     const std::wstring& target=found.target;
@@ -572,7 +610,7 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
             {
                 std::lock_guard<std::mutex> lock(g_macroMutex);
                 full=g_macros.size()>=100;
-                for(const auto&m:g_macros) if(TrimLower(m.phrase)==normalized) duplicate=true;
+                for(const auto&m:g_macros) if(NormalizeCommand(m.phrase)==NormalizeCommand(phrase)) duplicate=true;
                 if(!duplicate&&!full) g_macros.push_back({phrase,target});
             }
             if(full) { MessageBoxW(h,L"Лимит — 100 макросов.",L"J.A.R.V.I.S.",MB_OK|MB_ICONINFORMATION); return 0; }
