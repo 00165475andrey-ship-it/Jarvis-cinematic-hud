@@ -135,3 +135,10 @@ cmake --build build --config Release
 ```
 
 Исходный Windhawk-мод сохранён отдельно в `src/JARVIS_Cinematic_HUD.wh.cpp`.
+
+
+## Совместимость платформ
+
+Текущая версия J.A.R.V.I.S. Desktop — приложение для Windows x64. Windows 10/11 — основная цель; Windows 7 SP1 x64 собирается отдельным экспериментальным workflow. Linux и macOS пока не поддерживаются самим приложением: интерфейс, системные панели и захват микрофона используют Windows API. Windows x86 также не поддерживается текущим комплектом Vosk.
+
+Workflow **Platform compatibility checks** автоматически проверяет, что Linux/macOS и Windows x86 получают понятное сообщение о неподдерживаемой платформе. Это проверка защитных ограничений, а не кроссплатформенная сборка. Подробный план переноса: [docs/PLATFORM_PORTING.md](docs/PLATFORM_PORTING.md).
