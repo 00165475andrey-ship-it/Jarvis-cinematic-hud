@@ -81,8 +81,8 @@ void LoadVoiceSettings() {
     int key=GetPrivateProfileIntW(L"Voice",L"PushToTalkKey",VK_F7,g_settingsFile.c_str());
     if(key<=0 || key>255) key=VK_F7;
     g_pttKey=key;
-    g_sensitivity=std::clamp(GetPrivateProfileIntW(L"Voice",L"Sensitivity",65,g_settingsFile.c_str()),0,100);
-    g_confidence=std::clamp(GetPrivateProfileIntW(L"Voice",L"Confidence",35,g_settingsFile.c_str()),0,100);
+    g_sensitivity=std::clamp((int)GetPrivateProfileIntW(L"Voice",L"Sensitivity",65,g_settingsFile.c_str()),0,100);
+    g_confidence=std::clamp((int)GetPrivateProfileIntW(L"Voice",L"Confidence",35,g_settingsFile.c_str()),0,100);
     g_deviceId=GetPrivateProfileIntW(L"Voice",L"DeviceId",-1,g_settingsFile.c_str());
 }
 void SaveVoiceSettings() {
