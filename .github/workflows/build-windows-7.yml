@@ -33,7 +33,11 @@ jobs:
           Требуется Windows 7 SP1 x64.
           Запустите JarvisDesktop.exe. Настройки сохраняются в jarvis.ini рядом с программой.
           Сборка использует MSVC v142 и статическую C++ runtime-библиотеку.
+          Vosk runtime и русская модель включены в архив. Совместимость Vosk DLL на Windows 7 требует проверки на реальном ПК.
           '@ | Set-Content package-win7/README.txt -Encoding UTF8
+          ./tools/prepare-vosk.ps1 -Destination package-win7
+          if (-not (Test-Path package-win7/libvosk.dll)) { throw "Vosk runtime missing from Windows 7 package" }
+          if (-not (Test-Path package-win7/models/vosk-model-small-ru-0.22/am/final.mdl)) { throw "Russian Vosk model missing from Windows 7 package" }
           Compress-Archive -Path package-win7/* -DestinationPath JARVIS-Desktop-Windows-7-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
