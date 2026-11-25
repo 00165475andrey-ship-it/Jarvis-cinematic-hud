@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(JarvisDesktop LANGUAGES CXX)
+
+if(NOT WIN32)
+  message(FATAL_ERROR "J.A.R.V.I.S. Desktop currently uses Win32 APIs and cannot be built on Linux/macOS yet. See docs/PLATFORM_PORTING.md for the porting plan.")
+endif()
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "Only Windows x64 is supported: the bundled official Vosk 0.3.45 runtime is Windows x64.")
+endif()
 add_executable(JarvisDesktop WIN32 src/JarvisApp.cpp src/VoiceCommands.cpp)
 target_compile_features(JarvisDesktop PRIVATE cxx_std_17)
 target_compile_definitions(JarvisDesktop PRIVATE UNICODE _UNICODE)
