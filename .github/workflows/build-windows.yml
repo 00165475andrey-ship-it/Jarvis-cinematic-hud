@@ -22,7 +22,7 @@ jobs:
           @'
           J.A.R.V.I.S. Desktop
           Запустите JarvisDesktop.exe. Настройки сохраняются в jarvis.ini рядом с программой.
-          Windows 10/11 x64.
+          Windows 7 SP1 x64 / Windows 10/11 x64. Windows 7 compatibility depends on required system updates and must be validated on a Windows 7 machine.
           '@ | Set-Content package/README.txt -Encoding UTF8
           ./tools/prepare-vosk.ps1 -Destination package
           Compress-Archive -Path package/* -DestinationPath JARVIS-Desktop-Windows-x64.zip -Force
