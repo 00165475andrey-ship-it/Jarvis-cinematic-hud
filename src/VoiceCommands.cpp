@@ -121,7 +121,7 @@ void RefreshList() {
  HWND list=GetDlgItem(g_window,ID_VOICE_LIST);if(!list)return;SendMessageW(list,LB_RESETCONTENT,0,0);
  std::lock_guard<std::mutex> lock(g_macroMutex);for(const auto&m:g_macros){std::wstring line=m.phrase+L"  →  "+m.target;SendMessageW(list,LB_ADDSTRING,0,(LPARAM)line.c_str());}
 }
-void Start() {if(g_running.exchange(true))return;g_stop=false;g_worker=std::thread(Worker);}
+void Start() {if(g_running.exchange(true))return;if(g_worker.joinable())g_worker.join();g_stop=false;g_worker=std::thread(Worker);}
 void Stop() {g_stop=true;}
 LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  if(msg==WM_CREATE){g_window=h;LoadMacros();
@@ -147,7 +147,7 @@ LRESULT CALLBACK VoiceProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  }}
  if(msg==WM_VOICE_STATUS){HWND st=GetDlgItem(h,708);if(st)SetWindowTextW(st,g_status.c_str());return 0;}
  if(msg==WM_CLOSE){Stop();if(g_worker.joinable())g_worker.join();DestroyWindow(h);return 0;}
- if(msg==WM_DESTROY){g_window=nullptr;return 0;}
+ if(msg==WM_DESTROY){Stop();if(g_worker.joinable())g_worker.join();g_window=nullptr;return 0;}
  return DefWindowProcW(h,msg,wp,lp);
 }
 }
